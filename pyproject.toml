@@ -31,3 +31,11 @@ select = [
 dev = [
     "ruff>=0.12.10",
 ]
+
+[tool.taskipy]
+
+[tool.taskipy.tasks]
+# Run the app with src layout (no editable install required)
+run = "PYTHONPATH=src python -m rppg.app"
+lint = "ruff check ."
+fmt = "ruff format ."

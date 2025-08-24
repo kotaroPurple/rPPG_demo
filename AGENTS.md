@@ -10,9 +10,9 @@
 ## Build, Test, and Development Commands
 - Setup deps: `uv sync` (installs from `pyproject.toml`).
 - Add deps: `uv add opencv-python dearpygui mediapipe numpy scipy`.
-- Run app (src layout): `uv run python run_app.py`.
+- Run app: `uv run task run`（taskipy, src レイアウト対応）。
 - Run tests: `uv run pytest -q`.
-- Lint/format (ruff): `uv run ruff check .` / `uv run ruff format .`.
+- Lint/format: `uv run task lint` / `uv run task fmt`。
 
 ## Coding Style & Naming Conventions
 - Python 3.12+, PEP 8, type hints required for public APIs.

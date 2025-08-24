@@ -12,6 +12,7 @@
 - [x] 依存の追加（`uv add opencv-python dearpygui mediapipe numpy scipy`）
 - [x] フォーマッタ/リンタ導入（`ruff`）設定を `pyproject.toml` に追加
 - [x] `ruff` インストール（`uv add ruff`）と実行手順整備
+- [x] taskipy 導入・タスク定義（`uv run task run|lint|fmt`）
 
 ### 実装（Desktop/Core）
 - [x] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
