@@ -53,11 +53,15 @@ def main() -> None:
     rec_started_wall: Optional[float] = None
 
     # Capture thread
-    roi_detector = FaceBoxROI()
-    use_face_roi = False  # can be toggled from UI
+    # ROI detectors (lazy imported in their modules)
+    roi_mediapipe = FaceBoxROI()
+    from .roi import FaceCascadeROI
+    roi_cascade = FaceCascadeROI()
+    use_face_roi_cv = False  # OpenCV Haar-based ROI
+    use_face_roi_mp = False  # MediaPipe ROI
 
     def capture_loop() -> None:
-        nonlocal latest_frame_rgb, use_face_roi
+        nonlocal latest_frame_rgb, use_face_roi_cv, use_face_roi_mp
         cap_wrap: Optional[Capture] = None
         current_dev: Optional[int] = None
         try:
@@ -103,15 +107,21 @@ def main() -> None:
                 rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                 # Build ROI mask once face detected; fallback to full frame
                 mask = None
-                if use_face_roi:
+                # Prefer lightweight OpenCV ROI if enabled
+                if use_face_roi_cv:
                     try:
-                        mask = roi_detector.mask(rgb)
-                        # If detector returns empty mask, fallback to full frame
+                        mask = roi_cascade.mask(rgb)
                         if mask is not None and not mask.any():
                             mask = None
                     except Exception:
-                        # Auto-disable ROI on failure
-                        use_face_roi = False
+                        use_face_roi_cv = False
+                elif use_face_roi_mp:
+                    try:
+                        mask = roi_mediapipe.mask(rgb)
+                        if mask is not None and not mask.any():
+                            mask = None
+                    except Exception:
+                        use_face_roi_mp = False
                 r, g, b = mean_rgb(rgb, mask=mask)
                 with frame_lock:
                     latest_frame_rgb = rgb
@@ -242,10 +252,15 @@ def main() -> None:
                              min_value=0.2, max_value=2.0, callback=on_band_min)
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
                              min_value=2.5, max_value=5.0, callback=on_band_max)
-        def on_roi(sender, app_data, user_data):
-            nonlocal use_face_roi
-            use_face_roi = bool(app_data)
-        dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi)
+        def on_roi_cv(sender, app_data, user_data):
+            nonlocal use_face_roi_cv
+            use_face_roi_cv = bool(app_data)
+        dpg.add_checkbox(label="Use Face ROI (OpenCV)", default_value=False, callback=on_roi_cv)
+
+        def on_roi_mp(sender, app_data, user_data):
+            nonlocal use_face_roi_mp
+            use_face_roi_mp = bool(app_data)
+        dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi_mp)
 
         # Camera selection
         # Avoid probing devices to prevent triggering Continuity Camera side-effects.

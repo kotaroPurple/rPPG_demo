@@ -1,7 +1,10 @@
 """ROI extraction and mean RGB utilities.
 
-Includes a MediaPipe-based face detector to derive coarse cheek/forehead ROIs
-from the face bounding box for robust mean RGB measurements.
+Provides two ROI detectors:
+- FaceCascadeROI: OpenCV Haar-cascade based (lightweight, no TFLite)
+- FaceBoxROI: MediaPipe Face Detection based（CPU/TFLite）。
+
+Both return simple cheek/forehead rectangular masks from a detected face box.
 """
 
 from __future__ import annotations
@@ -127,6 +130,59 @@ class FaceBoxROI:
         # Forehead (middle third)
         fh = (slice(y1, y1 + h_quarter), slice(x1 + w_third, x2 - w_third))
 
+        mask[lc] = True
+        mask[rc] = True
+        mask[fh] = True
+        return mask
+
+
+class FaceCascadeROI:
+    """OpenCV Haar-cascade based face ROI (no ML runtime beyond OpenCV)."""
+
+    def __init__(self, downscale: int = 2) -> None:
+        import cv2
+
+        self.downscale = max(1, int(downscale))
+        # Use default frontal face cascade bundled with OpenCV
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        self._clf = cv2.CascadeClassifier(cascade_path)
+
+    def mask(self, frame_rgb: np.ndarray) -> np.ndarray:
+        import cv2
+
+        h, w, _ = frame_rgb.shape
+        ds = self.downscale
+        small = frame_rgb[::ds, ::ds]
+        gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
+        faces = self._clf.detectMultiScale(
+            gray, scaleFactor=1.1, minNeighbors=5, flags=cv2.CASCADE_SCALE_IMAGE
+        )
+        mask = np.zeros((h, w), dtype=bool)
+        if len(faces) == 0:
+            return mask
+        # Pick the largest face
+        x, y, bw, bh = max(faces, key=lambda r: r[2] * r[3])
+        # Scale back to full-res
+        x *= ds
+        y *= ds
+        bw *= ds
+        bh *= ds
+        x = int(x)
+        y = int(y)
+        bw = int(bw)
+        bh = int(bh)
+        x = max(0, min(w - 1, x))
+        y = max(0, min(h - 1, y))
+        bw = max(1, min(w - x, bw))
+        bh = max(1, min(h - y, bh))
+
+        x1, x2 = x, x + bw
+        y1, y2 = y, y + bh
+        w_third = bw // 3
+        h_quarter = bh // 4
+        lc = (slice(y1 + bh // 2, y2), slice(x1, x1 + w_third))
+        rc = (slice(y1 + bh // 2, y2), slice(x2 - w_third, x2))
+        fh = (slice(y1, y1 + h_quarter), slice(x1 + w_third, x2 - w_third))
         mask[lc] = True
         mask[rc] = True
         mask[fh] = True
