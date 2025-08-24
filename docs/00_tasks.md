@@ -9,12 +9,12 @@
 - [x] 設計書（デスクトップ＋将来Web対応）（`docs/03_design.md`）
 
 ### 環境/依存
-- [ ] 依存の追加（`uv add opencv-python dearpygui mediapipe numpy scipy`）
+- [x] 依存の追加（`uv add opencv-python dearpygui mediapipe numpy scipy`）
 - [x] フォーマッタ/リンタ導入（`ruff`）設定を `pyproject.toml` に追加
-- [ ] `ruff` インストール（`uv add ruff`）と実行手順整備
+- [x] `ruff` インストール（`uv add ruff`）と実行手順整備
 
 ### 実装（Desktop/Core）
-- [ ] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
+- [x] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
 - [ ] `capture.py`: カメラ取得（OpenCV）、FPS計測、タイムスタンプ
 - [ ] `roi.py`: 顔検出（MediaPipe）＋スキンマスク、複数ROI平均RGB
 - [ ] `preprocess.py`: 正規化（移動平均）＋バンドパス（0.7–4.0 Hz）
