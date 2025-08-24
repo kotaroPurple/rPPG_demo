@@ -32,10 +32,13 @@ def main() -> None:
     win_sec = 2.0
     fmin, fmax = 0.7, 4.0
     algo = "POS"  # or CHROM
-    selected_device = 0
+    # Prefer built-in camera (often index 1 on macOS when Continuity Camera is 0)
+    import sys as _sys
+    selected_device = 1 if _sys.platform == "darwin" else 0
 
     # State
     running = True
+    connected = False
     frame_lock = threading.Lock()
     latest_frame_rgb: Optional[np.ndarray] = None
     # Buffers for mean RGB and timestamps
@@ -59,6 +62,17 @@ def main() -> None:
         current_dev: Optional[int] = None
         try:
             while running:
+                if not connected:
+                    # Ensure closed when not connected
+                    try:
+                        if cap_wrap is not None:
+                            cap_wrap.release()
+                    except Exception:
+                        pass
+                    cap_wrap = None
+                    current_dev = None
+                    time.sleep(0.1)
+                    continue
                 # Reopen capture if device changed or not opened
                 if current_dev != selected_device or cap_wrap is None:
                     # Close previous
@@ -122,6 +136,9 @@ def main() -> None:
     def processing_loop() -> None:
         nonlocal bpm_value, snr_value
         while running:
+            if not connected:
+                time.sleep(0.1)
+                continue
             # Need enough samples for a window
             if len(T_buf) < 8:
                 time.sleep(0.05)
@@ -231,27 +248,8 @@ def main() -> None:
         dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi)
 
         # Camera selection
-        def probe_devices(max_index: int = 5) -> list[str]:
-            labels: list[str] = []
-            import sys as _sys
-            max_i = 1 if _sys.platform == "darwin" else max_index
-            for i in range(max_i + 1):
-                try:
-                    # Prefer AVFoundation on macOS to avoid backend noise
-                    cap = (
-                        cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
-                        if _sys.platform == "darwin" and hasattr(cv2, "CAP_AVFOUNDATION")
-                        else cv2.VideoCapture(i)
-                    )
-                    ok = cap.isOpened()
-                    cap.release()
-                    if ok:
-                        labels.append(str(i))
-                except Exception:
-                    continue
-            return labels or ["0"]
-
-        camera_options = probe_devices(5)
+        # Avoid probing devices to prevent triggering Continuity Camera side-effects.
+        camera_options = ["0", "1"] if _sys.platform == "darwin" else [str(i) for i in range(3)]
 
         def on_camera(sender, app_data, user_data):
             nonlocal selected_device
@@ -262,6 +260,13 @@ def main() -> None:
 
         dpg.add_combo(camera_options, default_value=str(selected_device), label="Camera",
                       callback=on_camera)
+
+        # Connect/Disconnect
+        def on_connect(sender, app_data, user_data):
+            nonlocal connected
+            connected = bool(app_data)
+
+        dpg.add_checkbox(label="Connect", default_value=False, callback=on_connect)
         # Recording controls
         def on_record(sender, app_data, user_data):
             nonlocal recording, rec
@@ -339,7 +344,8 @@ def main() -> None:
             fs_est = float(1.0 / np.median(dt)) if dt.size > 0 else 0.0
         else:
             fs_est = 0.0
-        dpg.set_value(status_text, f"Status: dev={selected_device} fs~{fs_est:.1f}Hz")
+        conn = "on" if connected else "off"
+        dpg.set_value(status_text, f"Status: conn={conn} dev={selected_device} fs~{fs_est:.1f}Hz")
         # Update spectrum series if available
         # Recompute minimal spectrum from latest buffer for display purpose
         if len(T_buf) >= 8:
@@ -363,8 +369,7 @@ def main() -> None:
     def schedule_ui_updates(interval_frames: int = 6) -> None:
         def _tick() -> None:
             ui_update_callback()
-            if running:
-                dpg.set_frame_callback(dpg.get_frame_count() + interval_frames, _tick)
+            dpg.set_frame_callback(dpg.get_frame_count() + interval_frames, _tick)
 
         dpg.set_frame_callback(dpg.get_frame_count() + interval_frames, _tick)
 
