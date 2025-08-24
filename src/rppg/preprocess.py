@@ -16,7 +16,11 @@ def moving_average_normalize(x: np.ndarray, win: int) -> np.ndarray:
     x = np.asarray(x, dtype=np.float32)
     win = max(int(win), 1)
     kernel = np.ones(win, dtype=np.float32) / float(win)
-    mean = np.convolve(x, kernel, mode="same")
+    # Edge-aware moving average using edge padding to keep scale near boundaries
+    pad_left = win // 2
+    pad_right = win - 1 - pad_left
+    xp = np.pad(x, (pad_left, pad_right), mode="edge")
+    mean = np.convolve(xp, kernel, mode="valid")
     mean[mean == 0] = 1.0
     return x / mean - 1.0
 

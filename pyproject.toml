@@ -29,6 +29,7 @@ select = [
 
 [dependency-groups]
 dev = [
+    "pytest>=8.4.1",
     "ruff>=0.12.10",
     "taskipy>=1.14.1",
 ]
@@ -40,3 +41,4 @@ dev = [
 run = "PYTHONPATH=src python -m rppg.app"
 lint = "ruff check ."
 fmt = "ruff format ."
+test = "pytest -q"
