@@ -30,6 +30,7 @@ select = [
 [dependency-groups]
 dev = [
     "ruff>=0.12.10",
+    "taskipy>=1.14.1",
 ]
 
 [tool.taskipy]
