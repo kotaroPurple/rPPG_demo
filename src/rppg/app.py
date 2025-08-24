@@ -32,6 +32,7 @@ def main() -> None:
     win_sec = 2.0
     fmin, fmax = 0.7, 4.0
     algo = "POS"  # or CHROM
+    selected_device = 0
 
     # State
     running = True
@@ -50,28 +51,53 @@ def main() -> None:
 
     # Capture thread
     roi_detector = FaceBoxROI()
+    use_face_roi = False  # can be toggled from UI
 
     def capture_loop() -> None:
-        nonlocal latest_frame_rgb
-        cap_wrap = Capture(CaptureConfig(0, width, height, fps_target))
-        try:
-            cap_wrap.open()
-        except Exception:
-            print("[ERROR] Failed to open camera")
-            return
+        nonlocal latest_frame_rgb, use_face_roi
+        cap_wrap: Optional[Capture] = None
+        current_dev: Optional[int] = None
         try:
             while running:
-                ts, frame_bgr = cap_wrap.read()
+                # Reopen capture if device changed or not opened
+                if current_dev != selected_device or cap_wrap is None:
+                    # Close previous
+                    try:
+                        if cap_wrap is not None:
+                            cap_wrap.release()
+                    except Exception:
+                        pass
+                    # Open new device
+                    try:
+                        cfg = CaptureConfig(selected_device, width, height, fps_target)
+                        cap_wrap = Capture(cfg)
+                        cap_wrap.open()
+                        current_dev = selected_device
+                    except Exception:
+                        # Could not open device, wait and retry
+                        time.sleep(0.5)
+                        continue
+                # Read frame
+                try:
+                    ts, frame_bgr = cap_wrap.read()
+                except Exception:
+                    # Read failure; force reopen next loop
+                    current_dev = None
+                    time.sleep(0.05)
+                    continue
                 # BGR -> RGB
                 rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                 # Build ROI mask once face detected; fallback to full frame
-                try:
-                    mask = roi_detector.mask(rgb)
-                    # If detector returns empty mask, fallback to full frame
-                    if mask is not None and not mask.any():
-                        mask = None
-                except Exception:
-                    mask = None
+                mask = None
+                if use_face_roi:
+                    try:
+                        mask = roi_detector.mask(rgb)
+                        # If detector returns empty mask, fallback to full frame
+                        if mask is not None and not mask.any():
+                            mask = None
+                    except Exception:
+                        # Auto-disable ROI on failure
+                        use_face_roi = False
                 r, g, b = mean_rgb(rgb, mask=mask)
                 with frame_lock:
                     latest_frame_rgb = rgb
@@ -86,7 +112,11 @@ def main() -> None:
                     except Exception:
                         pass
         finally:
-            cap_wrap.release()
+            try:
+                if cap_wrap is not None:
+                    cap_wrap.release()
+            except Exception:
+                pass
 
     # Processing thread
     def processing_loop() -> None:
@@ -169,6 +199,7 @@ def main() -> None:
         dpg.add_spacer(height=8)
         bpm_text = dpg.add_text("BPM: --")
         snr_text = dpg.add_text("SNR: -- dB")
+        status_text = dpg.add_text("Status: idle")
         # Controls
         def on_algo(sender, app_data, user_data):
             nonlocal algo
@@ -194,6 +225,43 @@ def main() -> None:
                              min_value=0.2, max_value=2.0, callback=on_band_min)
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
                              min_value=2.5, max_value=5.0, callback=on_band_max)
+        def on_roi(sender, app_data, user_data):
+            nonlocal use_face_roi
+            use_face_roi = bool(app_data)
+        dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi)
+
+        # Camera selection
+        def probe_devices(max_index: int = 5) -> list[str]:
+            labels: list[str] = []
+            import sys as _sys
+            max_i = 1 if _sys.platform == "darwin" else max_index
+            for i in range(max_i + 1):
+                try:
+                    # Prefer AVFoundation on macOS to avoid backend noise
+                    cap = (
+                        cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
+                        if _sys.platform == "darwin" and hasattr(cv2, "CAP_AVFOUNDATION")
+                        else cv2.VideoCapture(i)
+                    )
+                    ok = cap.isOpened()
+                    cap.release()
+                    if ok:
+                        labels.append(str(i))
+                except Exception:
+                    continue
+            return labels or ["0"]
+
+        camera_options = probe_devices(5)
+
+        def on_camera(sender, app_data, user_data):
+            nonlocal selected_device
+            try:
+                selected_device = int(app_data)
+            except Exception:
+                pass
+
+        dpg.add_combo(camera_options, default_value=str(selected_device), label="Camera",
+                      callback=on_camera)
         # Recording controls
         def on_record(sender, app_data, user_data):
             nonlocal recording, rec
@@ -264,6 +332,14 @@ def main() -> None:
         # Update BPM/SNR
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
         dpg.set_value(snr_text, f"SNR: {snr_value:.1f} dB")
+        # Compute a rough fs estimate for status line
+        if len(T_buf) > 1:
+            t_np = np.array(T_buf)
+            dt = np.diff(t_np[-min(len(t_np), 50) :])
+            fs_est = float(1.0 / np.median(dt)) if dt.size > 0 else 0.0
+        else:
+            fs_est = 0.0
+        dpg.set_value(status_text, f"Status: dev={selected_device} fs~{fs_est:.1f}Hz")
         # Update spectrum series if available
         # Recompute minimal spectrum from latest buffer for display purpose
         if len(T_buf) >= 8:

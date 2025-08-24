@@ -26,9 +26,15 @@ class Capture:
         self._cap = None
 
     def open(self) -> None:
+        import sys
+
         import cv2  # local import
 
-        self._cap = cv2.VideoCapture(self.cfg.device_index)
+        # Prefer AVFoundation on macOS for stability
+        if sys.platform == "darwin" and hasattr(cv2, "CAP_AVFOUNDATION"):
+            self._cap = cv2.VideoCapture(self.cfg.device_index, cv2.CAP_AVFOUNDATION)
+        else:
+            self._cap = cv2.VideoCapture(self.cfg.device_index)
         if not self._cap.isOpened():  # type: ignore[union-attr]
             raise RuntimeError("Failed to open camera")
         # Set properties (best-effort)
@@ -50,4 +56,3 @@ class Capture:
         if self._cap is not None:
             self._cap.release()  # type: ignore[union-attr]
             self._cap = None
-
