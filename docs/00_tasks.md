@@ -17,11 +17,12 @@
 ### 実装（Desktop/Core）
 - [x] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
 - [x] DearPyGUI 最小プレビューとBPM表示を実装（カメラ→平均RGB→POS→BPM）
-- [ ] `capture.py`: カメラ取得（OpenCV）、FPS計測、タイムスタンプ
-- [ ] `roi.py`: 顔検出（MediaPipe）＋スキンマスク、複数ROI平均RGB
-- [ ] `preprocess.py`: 正規化（移動平均）＋バンドパス（0.7–4.0 Hz）
-- [ ] `chrom.py`/`pos.py`: CHROM/POS 合成
-- [ ] `bpm.py`: FFTピーク検出＋平滑化、BPMレンジ制約
+ - [x] `capture.py`: カメラ取得（OpenCV）、FPS計測、タイムスタンプ（UI組込み）
+ - [x] `roi.py`: 顔検出（MediaPipe）＋スキンマスク（頬/額マスク）
+ - [x] `preprocess.py`: 正規化（移動平均）＋バンドパス（0.7–4.0 Hz）
+ - [x] `chrom.py`/`pos.py`: CHROM/POS 合成
+ - [x] `bpm.py`: FFTピーク検出、BPMレンジ制約
+ - [x] スペクトル表示とSNR表示を追加
 - [ ] `quality.py`: SNR/ピーク信頼度算出
 - [ ] `recorder.py`: CSV/JSON 非同期保存
 - [ ] `app.py`（DearPyGUI）: プレビュー、波形/スペクトル、BPM/品質、設定
@@ -37,7 +38,7 @@
 
 ### 運用/品質
 - [ ] 実行スクリプト追加例: `uv run python -m rppg.app`
-- [ ] README 更新（起動手順、注意点、既知の制約）
+ - [ ] README 更新（起動手順、注意点、既知の制約）
 - [ ] 動作確認（屋内拡散照明、軽微動作で HR MAE ≤ 5 BPM）
 
 更新ポリシー: タスク完了時にこのファイルにチェックを入れ、コミットする。

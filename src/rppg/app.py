@@ -19,9 +19,12 @@ def main() -> None:
     import numpy as np
 
     from .bpm import estimate_bpm
+    from .capture import Capture, CaptureConfig
     from .chrom import chrom_signal
     from .pos import pos_signal
     from .preprocess import bandpass, moving_average_normalize
+    from .quality import snr_db
+    from .recorder import Recorder, RecorderConfig
     from .roi import FaceBoxROI, mean_rgb
 
     # Config
@@ -40,28 +43,26 @@ def main() -> None:
     B_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     T_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     bpm_value = 0.0
+    snr_value = 0.0
+    recording = False
+    rec: Optional[Recorder] = None
 
     # Capture thread
     roi_detector = FaceBoxROI()
 
     def capture_loop() -> None:
         nonlocal latest_frame_rgb
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        cap.set(cv2.CAP_PROP_FPS, fps_target)
-        if not cap.isOpened():
+        cap_wrap = Capture(CaptureConfig(0, width, height, fps_target))
+        try:
+            cap_wrap.open()
+        except Exception:
             print("[ERROR] Failed to open camera")
             return
         try:
             while running:
-                ts = time.perf_counter()
-                ok, frame = cap.read()
-                if not ok:
-                    time.sleep(0.01)
-                    continue
+                ts, frame_bgr = cap_wrap.read()
                 # BGR -> RGB
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                 # Build ROI mask once face detected; fallback to full frame
                 try:
                     mask = roi_detector.mask(rgb)
@@ -74,12 +75,18 @@ def main() -> None:
                     G_buf.append(g)
                     B_buf.append(b)
                     T_buf.append(ts)
+                # Optional recording per frame
+                if recording and rec is not None:
+                    try:
+                        rec.write_row((ts, r, g, b, bpm_value))
+                    except Exception:
+                        pass
         finally:
-            cap.release()
+            cap_wrap.release()
 
     # Processing thread
     def processing_loop() -> None:
-        nonlocal bpm_value
+        nonlocal bpm_value, snr_value
         while running:
             # Need enough samples for a window
             if len(T_buf) < 8:
@@ -103,6 +110,14 @@ def main() -> None:
                 s = pos_signal(Rn, Gn, Bn)
             else:
                 s = chrom_signal(Rn, Gn, Bn)
+            # Spectrum and SNR
+            x = (s - s.mean()) * np.hanning(s.size).astype(np.float32)
+            X = np.fft.rfft(x)
+            freqs = np.fft.rfftfreq(s.size, d=1.0 / fs)
+            band = (freqs >= fmin) & (freqs <= fmax)
+            mag = np.abs(X)
+            idx = int(np.argmax(mag * band))
+            snr_value = snr_db(mag, idx)  # used in UI update
             bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax)
             bpm_value = bpm
             time.sleep(0.1)
@@ -130,6 +145,7 @@ def main() -> None:
         dpg.add_image(tex_tag)
         dpg.add_spacer(height=8)
         bpm_text = dpg.add_text("BPM: --")
+        snr_text = dpg.add_text("SNR: -- dB")
         # Controls
         def on_algo(sender, app_data, user_data):
             nonlocal algo
@@ -155,6 +171,34 @@ def main() -> None:
                              min_value=0.2, max_value=2.0, callback=on_band_min)
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
                              min_value=2.5, max_value=5.0, callback=on_band_max)
+        # Recording controls
+        def on_record(sender, app_data, user_data):
+            nonlocal recording, rec
+            if app_data and not recording:
+                # Start recording
+                ts_name = time.strftime("%Y%m%d-%H%M%S")
+                out_dir = RecorderConfig(out_dir=Path("runs") / ts_name)
+                rec = Recorder(out_dir)
+                rec.open(["ts", "R", "G", "B", "BPM"])
+                recording = True
+            elif (not app_data) and recording:
+                # Stop recording
+                if rec is not None:
+                    rec.close()
+                    rec = None
+                recording = False
+
+        from pathlib import Path
+
+        dpg.add_checkbox(label="Record (CSV)", default_value=False, callback=on_record)
+
+        # Spectrum plot (magnitude vs Hz)
+        plot_tag = "spectrum_plot"
+        series_tag = "spectrum_series"
+        with dpg.plot(label="Spectrum", height=200, width=-1, tag=plot_tag):
+            dpg.add_plot_axis(dpg.mvXAxis, label="Hz")
+            y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Mag")
+            dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_tag)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -181,8 +225,27 @@ def main() -> None:
                 axis=2,
             ).ravel()
             dpg.set_value(tex_tag, rgba)
-        # Update BPM
+        # Update BPM/SNR
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
+        dpg.set_value(snr_text, f"SNR: {snr_value:.1f} dB")
+        # Update spectrum series if available
+        # Recompute minimal spectrum from latest buffer for display purpose
+        if len(T_buf) >= 8:
+            t = np.array(T_buf, dtype=np.float64)
+            fs = 1.0 / np.median(np.diff(t[-min(len(t), 50) :]))
+            L = max(8, int(win_sec * fs))
+            if len(R_buf) >= L:
+                R = np.array(list(R_buf)[-L:], dtype=np.float32)
+                G = np.array(list(G_buf)[-L:], dtype=np.float32)
+                B = np.array(list(B_buf)[-L:], dtype=np.float32)
+                Rn = bandpass(moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax)
+                Gn = bandpass(moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax)
+                Bn = bandpass(moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax)
+                s = pos_signal(Rn, Gn, Bn) if algo == "POS" else chrom_signal(Rn, Gn, Bn)
+                x = (s - s.mean()) * np.hanning(s.size).astype(np.float32)
+                X = np.fft.rfft(x)
+                freqs = np.fft.rfftfreq(s.size, d=1.0 / fs)
+                dpg.set_value(series_tag, [freqs.tolist(), np.abs(X).tolist()])
 
     # Schedule periodic UI updates (~10 Hz) using frame callbacks
     def schedule_ui_updates(interval_frames: int = 6) -> None:
