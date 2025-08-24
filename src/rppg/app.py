@@ -129,7 +129,7 @@ def main() -> None:
     t_cap.start()
     t_proc.start()
 
-    # UI update loop (uses DearPyGUI callbacks/timers)
+    # UI update loop (uses frame callback scheduling)
     def ui_update_callback() -> None:
         # Update preview
         with frame_lock:
@@ -146,8 +146,16 @@ def main() -> None:
         # Update BPM
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
 
-    # Add a timer to refresh UI at ~10 Hz
-    dpg.add_timer(callback=ui_update_callback, delay=0.1, user_data=None)
+    # Schedule periodic UI updates (~10 Hz) using frame callbacks
+    def schedule_ui_updates(interval_frames: int = 6) -> None:
+        def _tick() -> None:
+            ui_update_callback()
+            if running:
+                dpg.set_frame_callback(dpg.get_frame_count() + interval_frames, _tick)
+
+        dpg.set_frame_callback(dpg.get_frame_count() + interval_frames, _tick)
+
+    schedule_ui_updates()
 
     dpg.start_dearpygui()
     dpg.destroy_context()
