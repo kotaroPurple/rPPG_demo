@@ -19,13 +19,16 @@ def main() -> None:
     import numpy as np
 
     from .bpm import estimate_bpm
+    from .chrom import chrom_signal
     from .pos import pos_signal
     from .preprocess import bandpass, moving_average_normalize
-    from .roi import mean_rgb
+    from .roi import FaceBoxROI, mean_rgb
 
     # Config
     width, height, fps_target = 640, 480, 30
     win_sec = 2.0
+    fmin, fmax = 0.7, 4.0
+    algo = "POS"  # or CHROM
 
     # State
     running = True
@@ -39,6 +42,8 @@ def main() -> None:
     bpm_value = 0.0
 
     # Capture thread
+    roi_detector = FaceBoxROI()
+
     def capture_loop() -> None:
         nonlocal latest_frame_rgb
         cap = cv2.VideoCapture(0)
@@ -57,7 +62,12 @@ def main() -> None:
                     continue
                 # BGR -> RGB
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                r, g, b = mean_rgb(rgb)
+                # Build ROI mask once face detected; fallback to full frame
+                try:
+                    mask = roi_detector.mask(rgb)
+                except Exception:
+                    mask = None
+                r, g, b = mean_rgb(rgb, mask=mask)
                 with frame_lock:
                     latest_frame_rgb = rgb
                     R_buf.append(r)
@@ -86,11 +96,14 @@ def main() -> None:
             G = np.array(list(G_buf)[-L:], dtype=np.float32)
             B = np.array(list(B_buf)[-L:], dtype=np.float32)
             # Normalize by moving average and band-pass filter
-            Rn = bandpass(moving_average_normalize(R, max(1, int(0.5 * fs))), fs)
-            Gn = bandpass(moving_average_normalize(G, max(1, int(0.5 * fs))), fs)
-            Bn = bandpass(moving_average_normalize(B, max(1, int(0.5 * fs))), fs)
-            s = pos_signal(Rn, Gn, Bn)
-            bpm, _ = estimate_bpm(s, fs=fs)
+            Rn = bandpass(moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax)
+            Gn = bandpass(moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax)
+            Bn = bandpass(moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax)
+            if algo == "POS":
+                s = pos_signal(Rn, Gn, Bn)
+            else:
+                s = chrom_signal(Rn, Gn, Bn)
+            bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax)
             bpm_value = bpm
             time.sleep(0.1)
 
@@ -117,6 +130,31 @@ def main() -> None:
         dpg.add_image(tex_tag)
         dpg.add_spacer(height=8)
         bpm_text = dpg.add_text("BPM: --")
+        # Controls
+        def on_algo(sender, app_data, user_data):
+            nonlocal algo
+            algo = app_data
+
+        def on_win(sender, app_data, user_data):
+            nonlocal win_sec
+            win_sec = float(app_data)
+
+        def on_band_min(sender, app_data, user_data):
+            nonlocal fmin
+            fmin = float(app_data)
+
+        def on_band_max(sender, app_data, user_data):
+            nonlocal fmax
+            fmax = float(app_data)
+
+        dpg.add_combo(("POS", "CHROM"), default_value=algo, label="Algorithm",
+                      callback=on_algo)
+        dpg.add_slider_float(label="Window (s)", default_value=win_sec,
+                             min_value=1.0, max_value=5.0, callback=on_win)
+        dpg.add_slider_float(label="Band min (Hz)", default_value=fmin,
+                             min_value=0.2, max_value=2.0, callback=on_band_min)
+        dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
+                             min_value=2.5, max_value=5.0, callback=on_band_max)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()

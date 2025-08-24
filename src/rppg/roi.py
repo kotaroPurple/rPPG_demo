@@ -1,11 +1,12 @@
 """ROI extraction and mean RGB utilities.
 
-This module will integrate MediaPipe for robust face landmarks; for now, it
-contains lightweight helpers not to block early testing.
+Includes a MediaPipe-based face detector to derive coarse cheek/forehead ROIs
+from the face bounding box for robust mean RGB measurements.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
@@ -39,3 +40,94 @@ def mean_rgb(
     # Convert BGR to RGB means
     b_mean, g_mean, r_mean = sel.mean(axis=0)
     return float(r_mean), float(g_mean), float(b_mean)
+
+
+@dataclass
+class FaceRoiConfig:
+    downscale: int = 2  # speed-up for detection
+    min_confidence: float = 0.5
+
+
+class FaceBoxROI:
+    """Face bounding-box based ROI builder using MediaPipe Face Detection.
+
+    Defines three rectangular ROIs (left/right cheek, forehead) inside the
+    detected face box and returns a combined boolean mask.
+    """
+
+    def __init__(self, cfg: Optional[FaceRoiConfig] = None) -> None:
+        self.cfg = cfg or FaceRoiConfig()
+        self._fd = None
+
+    def _ensure_model(self) -> None:
+        if self._fd is None:
+            try:
+                import mediapipe as mp  # type: ignore
+
+                self._fd = mp.solutions.face_detection.FaceDetection(
+                    model_selection=0,
+                    min_detection_confidence=self.cfg.min_confidence,
+                )
+            except Exception as exc:  # pragma: no cover - optional path
+                raise RuntimeError(
+                    f"Failed to initialize MediaPipe FaceDetection: {exc}"
+                ) from exc
+
+    def mask(self, frame_rgb: np.ndarray) -> np.ndarray:
+        """Compute a boolean mask of cheek+forehead regions.
+
+        Args:
+            frame_rgb: HxWx3 RGB uint8 array.
+
+        Returns:
+            HxW boolean mask.
+        """
+        self._ensure_model()
+        h, w, _ = frame_rgb.shape
+        # Downscale for speed
+        if self.cfg.downscale > 1:
+            ds = self.cfg.downscale
+            small = frame_rgb[::ds, ::ds]
+        else:
+            ds = 1
+            small = frame_rgb
+
+        # MediaPipe expects RGB
+        result = self._fd.process(small)  # type: ignore[union-attr]
+        mask = np.zeros((h, w), dtype=bool)
+        if not result.detections:
+            return mask
+
+        det = result.detections[0]
+        location = det.location_data.relative_bounding_box
+        # Convert relative bbox to full-res pixels
+        x = int(location.xmin * (w / ds))
+        y = int(location.ymin * (h / ds))
+        bw = int(location.width * (w / ds))
+        bh = int(location.height * (h / ds))
+        # Clamp
+        x = max(0, min(w - 1, x))
+        y = max(0, min(h - 1, y))
+        bw = max(1, min(w - x, bw))
+        bh = max(1, min(h - y, bh))
+
+        # Define sub-rectangles within face box
+        # Cheeks: lower half, left/right thirds; Forehead: upper quarter, middle third
+        x1 = x
+        x2 = x + bw
+        y1 = y
+        y2 = y + bh
+        w_third = bw // 3
+        h_quarter = bh // 4
+
+        # Left cheek
+        lc = (slice(y1 + bh // 2, y2), slice(x1, x1 + w_third))
+        # Right cheek
+        rc = (slice(y1 + bh // 2, y2), slice(x2 - w_third, x2))
+        # Forehead (middle third)
+        fh = (slice(y1, y1 + h_quarter), slice(x1 + w_third, x2 - w_third))
+
+        mask[lc] = True
+        mask[rc] = True
+        mask[fh] = True
+        return mask
