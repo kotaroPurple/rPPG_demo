@@ -10,7 +10,8 @@
 
 ### 環境/依存
 - [ ] 依存の追加（`uv add opencv-python dearpygui mediapipe numpy scipy`）
-- [ ] フォーマッタ/リンタ導入（`ruff` など）し、`pyproject.toml`に設定
+- [x] フォーマッタ/リンタ導入（`ruff`）設定を `pyproject.toml` に追加
+- [ ] `ruff` インストール（`uv add ruff`）と実行手順整備
 
 ### 実装（Desktop/Core）
 - [ ] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
@@ -38,4 +39,3 @@
 - [ ] 動作確認（屋内拡散照明、軽微動作で HR MAE ≤ 5 BPM）
 
 更新ポリシー: タスク完了時にこのファイルにチェックを入れ、コミットする。
-

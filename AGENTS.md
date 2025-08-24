@@ -12,7 +12,7 @@
 - Add deps: `uv add opencv-python dearpygui mediapipe numpy scipy`.
 - Run app (example): `uv run python -m rppg.app` or `uv run python src/app.py`.
 - Run tests: `uv run pytest -q`.
-- Lint/format (if configured): `uv run ruff check .`, `uv run ruff format .` or `uv run black .`.
+- Lint/format (ruff): `uv run ruff check .` / `uv run ruff format .`.
 
 ## Coding Style & Naming Conventions
 - Python 3.12+, PEP 8, type hints required for public APIs.

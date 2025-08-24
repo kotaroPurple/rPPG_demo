@@ -22,6 +22,7 @@
 - 依存追加（例・プロジェクトへ固定）:
   - `uv add opencv-python dearpygui mediapipe numpy scipy`
   - 依存の再現: `uv sync`
+ - コードチェック: `uv add ruff`（実行: `uv run ruff check .` / `uv run ruff format .`）
 
 ### 5. 依存ライブラリ（確定）
 - OpenCV (`opencv-python`)：カメラ取得、画像処理
