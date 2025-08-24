@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 
 
-def snr_db(power_spectrum: np.ndarray, peak_index: int, guard_bins: int = 1, band_bins: int = 5) -> float:
+def snr_db(
+    power_spectrum: np.ndarray,
+    peak_index: int,
+    guard_bins: int = 1,
+    band_bins: int = 5,
+) -> float:
     """Simple SNR estimate around a known peak index in the spectrum.
 
     Args:
@@ -23,4 +28,3 @@ def snr_db(power_spectrum: np.ndarray, peak_index: int, guard_bins: int = 1, ban
     if noise <= 0:
         return 0.0
     return 10.0 * float(np.log10(sig / noise))
-

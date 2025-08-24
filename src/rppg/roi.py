@@ -11,7 +11,10 @@ from typing import Optional, Tuple
 import numpy as np
 
 
-def mean_rgb(frame_bgr: np.ndarray, mask: Optional[np.ndarray] = None) -> Tuple[float, float, float]:
+def mean_rgb(
+    frame_bgr: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+) -> Tuple[float, float, float]:
     """Compute mean RGB over an optional boolean mask.
 
     Args:
@@ -36,4 +39,3 @@ def mean_rgb(frame_bgr: np.ndarray, mask: Optional[np.ndarray] = None) -> Tuple[
     # Convert BGR to RGB means
     b_mean, g_mean, r_mean = sel.mean(axis=0)
     return float(r_mean), float(g_mean), float(b_mean)
-

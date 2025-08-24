@@ -7,7 +7,12 @@ from typing import Tuple
 import numpy as np
 
 
-def estimate_bpm(signal: np.ndarray, fs: float, fmin: float = 0.7, fmax: float = 4.0) -> Tuple[float, float]:
+def estimate_bpm(
+    signal: np.ndarray,
+    fs: float,
+    fmin: float = 0.7,
+    fmax: float = 4.0,
+) -> Tuple[float, float]:
     """Estimate BPM by peak in band-limited magnitude spectrum.
 
     Returns (bpm, peak_freq_hz). If invalid, returns (0.0, 0.0).
@@ -28,4 +33,3 @@ def estimate_bpm(signal: np.ndarray, fs: float, fmin: float = 0.7, fmax: float =
     f_peak = float(freqs[idx])
     bpm = float(60.0 * f_peak) if f_peak > 0 else 0.0
     return bpm, f_peak
-

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import numpy as np
 from scipy.signal import butter, filtfilt
 
@@ -23,7 +21,13 @@ def moving_average_normalize(x: np.ndarray, win: int) -> np.ndarray:
     return x / mean - 1.0
 
 
-def bandpass(x: np.ndarray, fs: float, fmin: float = 0.7, fmax: float = 4.0, order: int = 3) -> np.ndarray:
+def bandpass(
+    x: np.ndarray,
+    fs: float,
+    fmin: float = 0.7,
+    fmax: float = 4.0,
+    order: int = 3,
+) -> np.ndarray:
     """Zero-phase Butterworth band-pass filter.
 
     Args:
@@ -41,4 +45,3 @@ def bandpass(x: np.ndarray, fs: float, fmin: float = 0.7, fmax: float = 4.0, ord
         return x.copy()
     b, a = butter(order, [low, high], btype="band")
     return filtfilt(b, a, x)
-
