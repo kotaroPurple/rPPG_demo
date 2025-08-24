@@ -46,6 +46,7 @@ def main() -> None:
     snr_value = 0.0
     recording = False
     rec: Optional[Recorder] = None
+    rec_started_wall: Optional[float] = None
 
     # Capture thread
     roi_detector = FaceBoxROI()
@@ -66,6 +67,9 @@ def main() -> None:
                 # Build ROI mask once face detected; fallback to full frame
                 try:
                     mask = roi_detector.mask(rgb)
+                    # If detector returns empty mask, fallback to full frame
+                    if mask is not None and not mask.any():
+                        mask = None
                 except Exception:
                     mask = None
                 r, g, b = mean_rgb(rgb, mask=mask)
@@ -95,6 +99,10 @@ def main() -> None:
             # Estimate sampling rate from timestamps
             t = np.array(T_buf, dtype=np.float64)
             fs = 1.0 / np.median(np.diff(t[-min(len(t), 50) :]))
+            # Effective upper band limited by sampling rate
+            fmax_eff = min(fmax, 0.45 * fs)
+            if fmax_eff <= fmin:
+                fmax_eff = fmin + 0.1
             L = max(8, int(win_sec * fs))
             if len(R_buf) < L:
                 time.sleep(0.05)
@@ -103,9 +111,9 @@ def main() -> None:
             G = np.array(list(G_buf)[-L:], dtype=np.float32)
             B = np.array(list(B_buf)[-L:], dtype=np.float32)
             # Normalize by moving average and band-pass filter
-            Rn = bandpass(moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax)
-            Gn = bandpass(moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax)
-            Bn = bandpass(moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax)
+            Rn = bandpass(moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax_eff)
+            Gn = bandpass(moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax_eff)
+            Bn = bandpass(moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax_eff)
             if algo == "POS":
                 s = pos_signal(Rn, Gn, Bn)
             else:
@@ -114,11 +122,11 @@ def main() -> None:
             x = (s - s.mean()) * np.hanning(s.size).astype(np.float32)
             X = np.fft.rfft(x)
             freqs = np.fft.rfftfreq(s.size, d=1.0 / fs)
-            band = (freqs >= fmin) & (freqs <= fmax)
+            band = (freqs >= fmin) & (freqs <= fmax_eff)
             mag = np.abs(X)
             idx = int(np.argmax(mag * band))
             snr_value = snr_db(mag, idx)  # used in UI update
-            bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax)
+            bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
             bpm_value = bpm
             time.sleep(0.1)
 
@@ -136,6 +144,21 @@ def main() -> None:
     def on_close() -> None:
         nonlocal running
         running = False
+        # Ensure recorder closes with metadata
+        try:
+            if recording and rec is not None:
+                meta = {
+                    "algo": algo,
+                    "window_sec": win_sec,
+                    "band_hz": [fmin, fmax],
+                    "camera": {"device": 0, "resolution": [width, height]},
+                    "started": rec_started_wall,
+                    "ended": time.time(),
+                }
+                rec.write_meta(meta)
+                rec.close()
+        except Exception:
+            pass
         # Give threads time to exit
         time.sleep(0.2)
         dpg.stop_dearpygui()
@@ -180,10 +203,23 @@ def main() -> None:
                 out_dir = RecorderConfig(out_dir=Path("runs") / ts_name)
                 rec = Recorder(out_dir)
                 rec.open(["ts", "R", "G", "B", "BPM"])
+                rec_started_wall = time.time()
                 recording = True
             elif (not app_data) and recording:
                 # Stop recording
                 if rec is not None:
+                    try:
+                        meta = {
+                            "algo": algo,
+                            "window_sec": win_sec,
+                            "band_hz": [fmin, fmax],
+                            "camera": {"device": 0, "resolution": [width, height]},
+                            "started": rec_started_wall,
+                            "ended": time.time(),
+                        }
+                        rec.write_meta(meta)
+                    except Exception:
+                        pass
                     rec.close()
                     rec = None
                 recording = False
