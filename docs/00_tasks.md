@@ -1,0 +1,41 @@
+## 開発タスク一覧
+
+目的: uv + DearPyGUI を用いたデスクトップrPPGアプリを実装し、将来のWeb UI連携を想定したサービス構成を整える。進捗に応じてチェックを更新する。
+
+### ドキュメント/設計
+- [x] 要求仕様書を作成（`docs/01_requirements.md`）
+- [x] rPPGアルゴリズム解説（数式$/$表記統一）（`docs/02_rppg_algorithm.md`）
+- [x] コントリビュータ向けガイド（`AGENTS.md`）
+- [x] 設計書（デスクトップ＋将来Web対応）（`docs/03_design.md`）
+
+### 環境/依存
+- [ ] 依存の追加（`uv add opencv-python dearpygui mediapipe numpy scipy`）
+- [ ] フォーマッタ/リンタ導入（`ruff` など）し、`pyproject.toml`に設定
+
+### 実装（Desktop/Core）
+- [ ] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
+- [ ] `capture.py`: カメラ取得（OpenCV）、FPS計測、タイムスタンプ
+- [ ] `roi.py`: 顔検出（MediaPipe）＋スキンマスク、複数ROI平均RGB
+- [ ] `preprocess.py`: 正規化（移動平均）＋バンドパス（0.7–4.0 Hz）
+- [ ] `chrom.py`/`pos.py`: CHROM/POS 合成
+- [ ] `bpm.py`: FFTピーク検出＋平滑化、BPMレンジ制約
+- [ ] `quality.py`: SNR/ピーク信頼度算出
+- [ ] `recorder.py`: CSV/JSON 非同期保存
+- [ ] `app.py`（DearPyGUI）: プレビュー、波形/スペクトル、BPM/品質、設定
+
+### Web連携（将来）
+- [ ] `service.py`: FastAPI + WebSocket でメトリクス配信
+- [ ] Webフロント雛形 `web/frontend/`（静的UI or SPA）
+
+### テスト/検証
+- [ ] `pytest` 導入と基本テスト（前処理/合成/BPM）
+- [ ] カメラ依存をモック化したユニットテスト
+- [ ] 最低カバレッジ閾値（例: 80%）の設定
+
+### 運用/品質
+- [ ] 実行スクリプト追加例: `uv run python -m rppg.app`
+- [ ] README 更新（起動手順、注意点、既知の制約）
+- [ ] 動作確認（屋内拡散照明、軽微動作で HR MAE ≤ 5 BPM）
+
+更新ポリシー: タスク完了時にこのファイルにチェックを入れ、コミットする。
+
