@@ -16,6 +16,7 @@
 
 ### 実装（Desktop/Core）
 - [x] パッケージ骨組み `src/rppg/` を作成（`__init__.py`, `app.py` スタブ）
+- [x] DearPyGUI 最小プレビューとBPM表示を実装（カメラ→平均RGB→POS→BPM）
 - [ ] `capture.py`: カメラ取得（OpenCV）、FPS計測、タイムスタンプ
 - [ ] `roi.py`: 顔検出（MediaPipe）＋スキンマスク、複数ROI平均RGB
 - [ ] `preprocess.py`: 正規化（移動平均）＋バンドパス（0.7–4.0 Hz）
