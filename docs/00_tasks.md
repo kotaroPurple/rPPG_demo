@@ -45,6 +45,10 @@
 - [x] ロギングとfaulthandler追加（`logs/`）
 - [x] Spectrum描画の間引き/点数制限・Barsモード追加
 - [x] SpectrumデフォルトをOFF
-- [ ] 既知のトラブルシュートをREADMEに記載（Continuity Camera, Spectrum描画）
+ - [x] 既知のトラブルシュートをREADMEに記載（Continuity Camera, Spectrum描画）
+
+### Web連携（将来）
+- [x] FastAPI サービスへ現在値メトリクスを提供（`/metrics`, `/ws`）
+- [ ] Web UI 雛形（メトリクスの簡易表示）
 
 更新ポリシー: タスク完了時にこのファイルにチェックを入れ、コミットする。

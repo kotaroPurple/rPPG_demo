@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from pathlib import Path
+import json
 
 
 @asynccontextmanager
@@ -31,11 +33,29 @@ async def health() -> dict[str, str]:  # pragma: no cover - trivial
 async def ws_metrics(ws: WebSocket) -> None:  # pragma: no cover - skeleton
     await ws.accept()
     try:
-        await ws.send_json({"hello": "rPPG"})
-        # In future: push metrics periodically
+        # Push single snapshot, then close (simple prototype)
+        p = Path("logs/current_metrics.json")
+        if p.exists():
+            try:
+                await ws.send_text(p.read_text())
+            except Exception:
+                await ws.send_json({"error": "read-failed"})
+        else:
+            await ws.send_json({"status": "no-metrics"})
         await ws.close()
     except WebSocketDisconnect:
         pass
+
+
+@app.get("/metrics")
+async def get_metrics() -> dict:
+    p = Path("logs/current_metrics.json")
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            return {"status": "read-failed"}
+    return {"status": "no-metrics"}
 
 
 def main() -> None:  # pragma: no cover - manual run helper

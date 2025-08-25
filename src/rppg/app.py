@@ -73,6 +73,10 @@ def main() -> None:
     T_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     bpm_value = 0.0
     snr_value = 0.0
+    # Shared spectrum data (processing thread produces, UI consumes)
+    spec_lock = threading.Lock()
+    spec_freqs_ds: Optional[list[float]] = None
+    spec_mag_ds: Optional[list[float]] = None
     recording = False
     rec: Optional[Recorder] = None
     rec_started_wall: Optional[float] = None
@@ -189,7 +193,7 @@ def main() -> None:
 
     # Processing thread
     def processing_loop() -> None:
-        nonlocal bpm_value, snr_value
+        nonlocal bpm_value, snr_value, spec_freqs_ds, spec_mag_ds
         while running:
             if not connected:
                 time.sleep(0.1)
@@ -230,6 +234,39 @@ def main() -> None:
             snr_value = snr_db(mag, idx)  # used in UI update
             bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
             bpm_value = bpm
+            # Write lightweight metrics snapshot (for external service/debug)
+            try:
+                import json as _json
+                from pathlib import Path as _Path
+
+                md = {
+                    "t": float(time.time()),
+                    "bpm": float(bpm_value),
+                    "snr": float(snr_value),
+                    "fs": float(fs),
+                }
+                p = _Path("logs")
+                try:
+                    p.mkdir(exist_ok=True)
+                except Exception:
+                    pass
+                (_Path("logs") / "current_metrics.json").write_text(_json.dumps(md))
+            except Exception:
+                pass
+            # Prepare downsampled spectrum for UI (avoid heavy work in UI thread)
+            max_points = 256
+            if mag.size > 0 and freqs.size == mag.size:
+                mag = np.nan_to_num(mag, nan=0.0, posinf=0.0, neginf=0.0)
+                if freqs.size > max_points:
+                    idx_ds = np.linspace(0, freqs.size - 1, max_points).astype(int)
+                    f_ds = freqs[idx_ds].tolist()
+                    m_ds = mag[idx_ds].tolist()
+                else:
+                    f_ds = freqs.tolist()
+                    m_ds = mag.tolist()
+                with spec_lock:
+                    spec_freqs_ds = f_ds
+                    spec_mag_ds = m_ds
             time.sleep(0.1)
 
     # UI setup
@@ -517,29 +554,22 @@ def main() -> None:
                             freqs_ds = freqs
                             mag_ds = mag
                         try:
-                            mode = spectrum_mode if 'spectrum_mode' in locals() or 'spectrum_mode' in globals() else "Bars"
-                            if mode == "Line":
-                                dpg.configure_item(series_bar_tag, show=False)
-                                dpg.configure_item(series_line_tag, show=True)
-                                dpg.set_value(series_line_tag, [freqs_ds.tolist(), mag_ds.tolist()])
+                            # Bars only（安定性優先）
+                            dpg.configure_item(series_line_tag, show=False)
+                            dpg.configure_item(series_bar_tag, show=True)
+                            # 64本にさらに間引き
+                            if freqs_ds.size > 64:
+                                idx2 = np.linspace(0, freqs_ds.size - 1, 64).astype(int)
+                                fx = freqs_ds[idx2]
+                                my = mag_ds[idx2]
                             else:
-                                # Bars: keep points limited for stability
-                                dpg.configure_item(series_line_tag, show=False)
-                                dpg.configure_item(series_bar_tag, show=True)
-                                # Further reduce to 64 bars for safety
-                                if freqs_ds.size > 64:
-                                    idx2 = np.linspace(0, freqs_ds.size - 1, 64).astype(int)
-                                    fx = freqs_ds[idx2]
-                                    my = mag_ds[idx2]
-                                else:
-                                    fx = freqs_ds
-                                    my = mag_ds
-                                dpg.set_value(series_bar_tag, [fx.tolist(), my.tolist()])
+                                fx = freqs_ds
+                                my = mag_ds
+                            dpg.set_value(series_bar_tag, [fx.tolist(), my.tolist()])
                         except Exception:
-                            # On persistent failures, hide spectrum series to avoid crashes
                             try:
-                                dpg.configure_item(series_line_tag, show=False)
                                 dpg.configure_item(series_bar_tag, show=False)
+                                dpg.configure_item(series_line_tag, show=False)
                             except Exception:
                                 pass
 

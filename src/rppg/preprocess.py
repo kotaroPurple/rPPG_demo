@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, lfilter
 
 
 def moving_average_normalize(x: np.ndarray, win: int) -> np.ndarray:
@@ -32,7 +32,7 @@ def bandpass(
     fmax: float = 4.0,
     order: int = 3,
 ) -> np.ndarray:
-    """Zero-phase Butterworth band-pass filter.
+    """Causal Butterworth band-pass filter（lfilter）。
 
     Args:
         x: 1D array.
@@ -48,4 +48,5 @@ def bandpass(
     if not (0 < low < high < 1):
         return x.copy()
     b, a = butter(order, [low, high], btype="band")
-    return filtfilt(b, a, x)
+    # 組み込み安定性優先で常に lfilter を使用（ゼロ位相は要求しない）
+    return lfilter(b, a, x)

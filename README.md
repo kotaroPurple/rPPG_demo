@@ -6,6 +6,7 @@ This repository implements remote photoplethysmography (rPPG) based on the TBME 
 - Create venv and sync deps: `uv sync`
 - Lint/format: `uv run task lint` / `uv run task fmt`
 - Run app: `uv run task run`
+- Web service: `uv run task serve` → http://127.0.0.1:8000/metrics
 
 Notes
 - Grant camera permission to the terminal if prompted (macOS: System Settings → Privacy & Security → Camera).
@@ -33,7 +34,12 @@ Notes
 - Style: Ruff with line-length 100
 - Source layout: `src/`; tasks handled via `taskipy` (`uv run task -l`)
 
+- Filtering: For embedded stability, band-pass uses `lfilter` (causal). Zero-phase is not applied by design.
 ### Troubleshooting
 - macOS Continuity Camera: If iPhone camera attaches automatically and causes instability, disable Continuity Camera in macOS/iPhone Handoff settings, or select the built-in camera (Camera=0/1) before connecting.
 - Spectrum plot: On some systems the spectrum drawing can crash GPU drivers. Keep Spectrum OFF (default) or use Bars mode. Updates are throttled and downsampled, but if issues persist, leave Spectrum OFF.
 - Logs: Check `logs/app.log` and `logs/faulthandler.log` for diagnostics.
+### Web UI (Prototype)
+- Start service: `uv run task serve`
+- Static HTML (open locally): `web/frontend/index.html`
+- The page polls `/metrics` and shows BPM/SNR. Prototype only.

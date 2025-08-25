@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>rPPG Metrics</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; max-width: 480px; }
+      .row { display: flex; gap: 1rem; }
+      .label { color: #555; width: 6rem; }
+      .val { font-weight: 600; }
+      button { padding: 0.5rem 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>rPPG Metrics (Local)</h1>
+    <div class="card">
+      <div class="row"><div class="label">BPM</div><div id="bpm" class="val">--</div></div>
+      <div class="row"><div class="label">SNR</div><div id="snr" class="val">-- dB</div></div>
+      <div class="row"><div class="label">fs</div><div id="fs" class="val">-- Hz</div></div>
+      <div class="row"><div class="label">t</div><div id="t" class="val">--</div></div>
+      <p>
+        <button id="refresh">Refresh</button>
+      </p>
+    </div>
+    <script>
+      async function refresh() {
+        try {
+          const res = await fetch('/metrics');
+          const data = await res.json();
+          document.getElementById('bpm').textContent = (data.bpm ?? '--').toFixed ? data.bpm.toFixed(1) : data.bpm;
+          document.getElementById('snr').textContent = (data.snr ?? '--').toFixed ? data.snr.toFixed(1) + ' dB' : data.snr;
+          document.getElementById('fs').textContent = (data.fs ?? '--').toFixed ? data.fs.toFixed(1) + ' Hz' : data.fs;
+          document.getElementById('t').textContent = data.t ?? '--';
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      document.getElementById('refresh').addEventListener('click', refresh);
+      refresh();
+      setInterval(refresh, 2000);
+    </script>
+  </body>
+  </html>
