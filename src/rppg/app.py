@@ -53,13 +53,21 @@ def main() -> None:
     from .roi import FaceBoxROI, mean_rgb
 
     # Config
-    width, height, fps_target = 640, 480, 30
-    win_sec = 2.0
-    fmin, fmax = 0.7, 4.0
+    width, height, fps_target = 1280, 720, 30
+    win_sec = 3.0
+    fmin, fmax = 0.7, 2.0  # default upper bound 120 BPM for stability
     algo = "POS"  # or CHROM
     # Default camera index
     import sys as _sys
     selected_device = 0
+    # Resolution selection (name -> (w,h))
+    res_options = {
+        "640x480": (640, 480),
+        "960x540": (960, 540),
+        "1280x720": (1280, 720),
+        "1920x1080": (1920, 1080),
+    }
+    selected_res_name = "1280x720"
 
     # State
     running = True
@@ -95,7 +103,7 @@ def main() -> None:
     use_face_roi_mp = False  # MediaPipe ROI
 
     def capture_loop() -> None:
-        nonlocal latest_frame_rgb
+        nonlocal latest_frame_rgb, width, height
         nonlocal use_face_roi_cv, use_face_roi_mp
         nonlocal roi_mode_used, roi_face_found, roi_bbox
         cap_wrap: Optional[Capture] = None
@@ -113,8 +121,9 @@ def main() -> None:
                     current_dev = None
                     time.sleep(0.1)
                     continue
-                # Reopen capture if device changed or not opened
-                if current_dev != selected_device or cap_wrap is None:
+                # Reopen capture if device or resolution changed or not opened
+                desired_res = res_options.get(selected_res_name, (width, height))
+                if (current_dev != selected_device) or (cap_wrap is None) or (desired_res != (width, height)):
                     # Close previous
                     try:
                         if cap_wrap is not None:
@@ -123,6 +132,8 @@ def main() -> None:
                         pass
                     # Open new device
                     try:
+                        # Update capture resolution to desired
+                        width, height = desired_res
                         cfg = CaptureConfig(selected_device, width, height, fps_target)
                         cap_wrap = Capture(cfg)
                         cap_wrap.open()
@@ -364,7 +375,16 @@ def main() -> None:
         dpg.add_slider_float(label="Band min (Hz)", default_value=fmin,
                              min_value=0.2, max_value=2.0, callback=on_band_min)
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
-                             min_value=2.5, max_value=5.0, callback=on_band_max)
+                             min_value=1.5, max_value=5.0, callback=on_band_max)
+        # Resolution selection
+        def on_res(sender, app_data, user_data):
+            nonlocal selected_res_name
+            selected_res_name = app_data
+        try:
+            dpg.add_combo(list(res_options.keys()), default_value=selected_res_name, label="Resolution",
+                          callback=on_res)
+        except Exception:
+            pass
         def on_roi_cv(sender, app_data, user_data):
             nonlocal use_face_roi_cv
             use_face_roi_cv = bool(app_data)
