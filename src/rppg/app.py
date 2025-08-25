@@ -77,6 +77,10 @@ def main() -> None:
     rec: Optional[Recorder] = None
     rec_started_wall: Optional[float] = None
 
+    # ROI status (for UI)
+    roi_mode_used = "Full"
+    roi_face_found = False
+
     # Capture thread
     # ROI detectors (lazy imported in their modules)
     roi_mediapipe = FaceBoxROI()
@@ -86,7 +90,7 @@ def main() -> None:
     use_face_roi_mp = False  # MediaPipe ROI
 
     def capture_loop() -> None:
-        nonlocal latest_frame_rgb, use_face_roi_cv, use_face_roi_mp
+        nonlocal latest_frame_rgb, use_face_roi_cv, use_face_roi_mp, roi_mode_used, roi_face_found
         cap_wrap: Optional[Capture] = None
         current_dev: Optional[int] = None
         try:
@@ -154,6 +158,15 @@ def main() -> None:
                             _logging.exception("MediaPipe ROI failed")
                         except Exception:
                             pass
+                # Update ROI status for UI
+                if use_face_roi_cv:
+                    roi_mode_used = "OpenCV"
+                elif use_face_roi_mp:
+                    roi_mode_used = "MediaPipe"
+                else:
+                    roi_mode_used = "Full"
+                roi_face_found = bool(mask is not None)
+
                 r, g, b = mean_rgb(rgb, mask=mask)
                 with frame_lock:
                     latest_frame_rgb = rgb
@@ -221,14 +234,16 @@ def main() -> None:
 
     # UI setup
     dpg.create_context()
-    dpg.create_viewport(title="rPPG Demo", width=1024, height=720)
+    dpg.create_viewport(title="rPPG Demo", width=1280, height=900)
 
     # Texture for preview (RGBA float)
     tex_tag = "preview_tex"
     primary_tag = "primary_window"
+    # Use smaller internal texture to reduce update load
+    tex_w, tex_h = 320, 240
     with dpg.texture_registry():
-        empty = np.zeros((height, width, 4), dtype=np.float32).ravel()
-        dpg.add_dynamic_texture(width, height, empty, tag=tex_tag)
+        tex_buf = np.zeros((tex_h, tex_w, 4), dtype=np.float32)
+        dpg.add_dynamic_texture(tex_w, tex_h, tex_buf.ravel(), tag=tex_tag)
 
     def on_close() -> None:
         nonlocal running
@@ -252,13 +267,31 @@ def main() -> None:
         time.sleep(0.2)
         dpg.stop_dearpygui()
 
-    with dpg.window(tag=primary_tag, label="rPPG Demo", width=1000, height=680):
-        dpg.add_text("Camera Preview")
-        dpg.add_image(tex_tag)
-        dpg.add_spacer(height=8)
-        bpm_text = dpg.add_text("BPM: --")
-        snr_text = dpg.add_text("SNR: -- dB")
-        status_text = dpg.add_text("Status: idle")
+    with dpg.window(tag=primary_tag, label="rPPG Demo", width=1260, height=860):
+        with dpg.group(horizontal=True):
+            # Left panel: Preview + Spectrum
+            with dpg.child_window(width=900, height=820):
+                dpg.add_text("Camera Preview")
+                # Display scaled-up size regardless of internal texture size
+                dpg.add_image(tex_tag, width=900, height=675)
+                dpg.add_spacer(height=8)
+                bpm_text = dpg.add_text("BPM: --")
+                snr_text = dpg.add_text("SNR: -- dB")
+                status_text = dpg.add_text("Status: idle")
+                # Spectrum plot (magnitude vs Hz)
+                plot_tag = "spectrum_plot"
+                series_line_tag = "spectrum_line"
+                series_bar_tag = "spectrum_bar"
+                with dpg.plot(label="Spectrum", height=220, width=-1, tag=plot_tag):
+                    dpg.add_plot_axis(dpg.mvXAxis, label="Hz")
+                    y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Mag")
+                    dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_line_tag)
+                    dpg.add_bar_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_bar_tag)
+                    dpg.configure_item(series_line_tag, show=False)
+                    dpg.configure_item(series_bar_tag, show=False)
+            # Right panel: Controls
+            with dpg.child_window(width=340, height=820):
+                dpg.add_text("Controls")
         # Controls
         def on_algo(sender, app_data, user_data):
             nonlocal algo
@@ -309,6 +342,9 @@ def main() -> None:
         dpg.add_checkbox(label="Preview", default_value=True, callback=on_preview)
         dpg.add_checkbox(label="Spectrum", default_value=False, callback=on_spectrum)
 
+        # ROI status indicator
+        roi_status_text = dpg.add_text("ROI: Full | Face: --")
+
         # Camera selection
         # Avoid probing devices to prevent triggering Continuity Camera side-effects.
         camera_options = ["0", "1"] if _sys.platform == "darwin" else [str(i) for i in range(3)]
@@ -330,12 +366,35 @@ def main() -> None:
 
         dpg.add_checkbox(label="Connect", default_value=False, callback=on_connect)
         # Recording controls
+        record_base_dir = Path("runs")
+        dir_label = dpg.add_text(f"Output Dir: {record_base_dir}")
+
+        def on_choose_dir(sender, app_data):
+            nonlocal record_base_dir
+            try:
+                p = Path(app_data.get("file_path_name", ""))
+                if p.exists():
+                    record_base_dir = p
+                    dpg.set_value(dir_label, f"Output Dir: {record_base_dir}")
+            except Exception:
+                pass
+
+        with dpg.file_dialog(
+            directory_selector=True,
+            show=False,
+            callback=on_choose_dir,
+            tag="dir_dialog",
+        ):
+            dpg.add_file_extension("")
+
+        dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("dir_dialog"))
+
         def on_record(sender, app_data, user_data):
             nonlocal recording, rec
             if app_data and not recording:
                 # Start recording
                 ts_name = time.strftime("%Y%m%d-%H%M%S")
-                out_dir = RecorderConfig(out_dir=Path("runs") / ts_name)
+                out_dir = RecorderConfig(out_dir=record_base_dir / ts_name)
                 rec = Recorder(out_dir)
                 rec.open(["ts", "R", "G", "B", "BPM"])
                 rec_started_wall = time.time()
@@ -363,28 +422,6 @@ def main() -> None:
 
         dpg.add_checkbox(label="Record (CSV)", default_value=False, callback=on_record)
 
-        # Spectrum plot (magnitude vs Hz)
-        plot_tag = "spectrum_plot"
-        series_line_tag = "spectrum_line"
-        series_bar_tag = "spectrum_bar"
-        with dpg.plot(label="Spectrum", height=200, width=-1, tag=plot_tag):
-            dpg.add_plot_axis(dpg.mvXAxis, label="Hz")
-            y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Mag")
-            dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_line_tag)
-            dpg.add_bar_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_bar_tag)
-            dpg.configure_item(series_bar_tag, show=False)
-
-        # Spectrum mode: Bars (safer) or Line
-        spectrum_mode = "Bars"
-        def on_spec_mode(sender, app_data, user_data):
-            nonlocal spectrum_mode
-            spectrum_mode = app_data
-            # Toggle visibility
-            dpg.configure_item(series_bar_tag, show=(spectrum_mode == "Bars"))
-            dpg.configure_item(series_line_tag, show=(spectrum_mode == "Line"))
-        dpg.add_combo(("Bars", "Line"), default_value=spectrum_mode, label="Spectrum Mode",
-                      callback=on_spec_mode)
-
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.set_primary_window(primary_tag, True)
@@ -403,17 +440,31 @@ def main() -> None:
             frame = latest_frame_rgb.copy() if latest_frame_rgb is not None else None
         if frame is not None and preview_enabled:
             # Ensure size matches texture; resize if camera differs
-            if frame.shape[0] != height or frame.shape[1] != width:
-                frame = cv2.resize(frame, (width, height))
+            # Throttle preview updates (~30 FPS)
+            if not hasattr(ui_update_callback, "_prev_counter"):
+                ui_update_callback._prev_counter = 0  # type: ignore[attr-defined]
+            ui_update_callback._prev_counter += 1  # type: ignore[attr-defined]
+            if frame.shape[0] != tex_h or frame.shape[1] != tex_w:
+                frame_small = cv2.resize(frame, (tex_w, tex_h))
+            else:
+                frame_small = frame
             try:
-                alpha = np.ones((height, width, 1), dtype=np.float32)
-                rgba = np.concatenate([frame.astype(np.float32) / 255.0, alpha], axis=2).ravel()
-                dpg.set_value(tex_tag, rgba)
+                if ui_update_callback._prev_counter % 2 == 0:  # type: ignore[attr-defined]
+                    # Write into persistent buffer to avoid realloc
+                    tex_buf[:, :, :3] = frame_small.astype(np.float32) / 255.0
+                    tex_buf[:, :, 3] = 1.0
+                    dpg.set_value(tex_tag, tex_buf.ravel())
             except Exception:
                 pass
         # Update BPM/SNR
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
         dpg.set_value(snr_text, f"SNR: {snr_value:.1f} dB")
+        # Update ROI status line
+        status_roi = f"ROI: {roi_mode_used} | Face: {'Y' if roi_face_found else 'N'}"
+        try:
+            dpg.set_value(roi_status_text, status_roi)
+        except Exception:
+            pass
         # Compute a rough fs estimate for status line
         if len(T_buf) > 1:
             t_np = np.array(T_buf)
@@ -466,7 +517,8 @@ def main() -> None:
                             freqs_ds = freqs
                             mag_ds = mag
                         try:
-                            if spectrum_mode == "Line":
+                            mode = spectrum_mode if 'spectrum_mode' in locals() or 'spectrum_mode' in globals() else "Bars"
+                            if mode == "Line":
                                 dpg.configure_item(series_bar_tag, show=False)
                                 dpg.configure_item(series_line_tag, show=True)
                                 dpg.set_value(series_line_tag, [freqs_ds.tolist(), mag_ds.tolist()])
