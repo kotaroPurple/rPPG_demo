@@ -6,12 +6,12 @@ future. Keep processing integration for later to avoid coupling.
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pathlib import Path
-import json
 
 
 @asynccontextmanager

@@ -84,6 +84,7 @@ def main() -> None:
     # ROI status (for UI)
     roi_mode_used = "Full"
     roi_face_found = False
+    roi_bbox: Optional[tuple[int, int, int, int]] = None  # (x, y, w, h) in full-res
 
     # Capture thread
     # ROI detectors (lazy imported in their modules)
@@ -94,7 +95,9 @@ def main() -> None:
     use_face_roi_mp = False  # MediaPipe ROI
 
     def capture_loop() -> None:
-        nonlocal latest_frame_rgb, use_face_roi_cv, use_face_roi_mp, roi_mode_used, roi_face_found
+        nonlocal latest_frame_rgb
+        nonlocal use_face_roi_cv, use_face_roi_mp
+        nonlocal roi_mode_used, roi_face_found, roi_bbox
         cap_wrap: Optional[Capture] = None
         current_dev: Optional[int] = None
         try:
@@ -170,6 +173,14 @@ def main() -> None:
                 else:
                     roi_mode_used = "Full"
                 roi_face_found = bool(mask is not None)
+                # Compute bbox for overlay if mask is available
+                if mask is not None and mask.any():
+                    ys, xs = np.where(mask)
+                    x0, x1 = int(xs.min()), int(xs.max())
+                    y0, y1 = int(ys.min()), int(ys.max())
+                    roi_bbox = (x0, y0, int(x1 - x0 + 1), int(y1 - y0 + 1))
+                else:
+                    roi_bbox = None
 
                 r, g, b = mean_rgb(rgb, mask=mask)
                 with frame_lock:
@@ -485,6 +496,17 @@ def main() -> None:
                 frame_small = cv2.resize(frame, (tex_w, tex_h))
             else:
                 frame_small = frame
+            # Draw face bbox overlay if available (green rectangle)
+            if roi_bbox is not None:
+                x, y, w, h = roi_bbox
+                sx = int(x * tex_w / width)
+                sy = int(y * tex_h / height)
+                ex = int((x + w) * tex_w / width)
+                ey = int((y + h) * tex_h / height)
+                try:
+                    cv2.rectangle(frame_small, (sx, sy), (ex, ey), (0, 255, 0), 2)
+                except Exception:
+                    pass
             try:
                 if ui_update_callback._prev_counter % 2 == 0:  # type: ignore[attr-defined]
                     # Write into persistent buffer to avoid realloc
