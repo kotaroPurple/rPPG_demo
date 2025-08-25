@@ -41,4 +41,10 @@
  - [ ] README 更新（起動手順、注意点、既知の制約）
 - [ ] 動作確認（屋内拡散照明、軽微動作で HR MAE ≤ 5 BPM）
 
+### デバッグ/安定化（追加）
+- [x] ロギングとfaulthandler追加（`logs/`）
+- [x] Spectrum描画の間引き/点数制限・Barsモード追加
+- [x] SpectrumデフォルトをOFF
+- [ ] 既知のトラブルシュートをREADMEに記載（Continuity Camera, Spectrum描画）
+
 更新ポリシー: タスク完了時にこのファイルにチェックを入れ、コミットする。

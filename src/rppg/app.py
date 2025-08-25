@@ -14,9 +14,34 @@ from typing import Deque, Optional
 def main() -> None:
     """Launch a minimal DearPyGUI window with camera preview and BPM display."""
     # Import locally to avoid hard dependency at import time
+    from pathlib import Path
+
     import cv2
     import dearpygui.dearpygui as dpg
     import numpy as np
+
+    # Initialize logging and fault handler
+    logs_dir = Path("logs")
+    try:
+        logs_dir.mkdir(exist_ok=True)
+    except Exception:
+        pass
+    try:
+        import faulthandler
+        import logging
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(message)s",
+            handlers=[
+                logging.FileHandler(logs_dir / "app.log", encoding="utf-8"),
+                logging.StreamHandler(),
+            ],
+        )
+        fh = (logs_dir / "faulthandler.log").open("w")
+        faulthandler.enable(fh)
+    except Exception:
+        pass
 
     from .bpm import estimate_bpm
     from .capture import Capture, CaptureConfig
@@ -32,9 +57,9 @@ def main() -> None:
     win_sec = 2.0
     fmin, fmax = 0.7, 4.0
     algo = "POS"  # or CHROM
-    # Prefer built-in camera (often index 1 on macOS when Continuity Camera is 0)
+    # Default camera index
     import sys as _sys
-    selected_device = 1 if _sys.platform == "darwin" else 0
+    selected_device = 0
 
     # State
     running = True
@@ -122,6 +147,13 @@ def main() -> None:
                             mask = None
                     except Exception:
                         use_face_roi_mp = False
+                        # log silently; mediapipe may fail on some setups
+                        try:
+                            import logging as _logging
+
+                            _logging.exception("MediaPipe ROI failed")
+                        except Exception:
+                            pass
                 r, g, b = mean_rgb(rgb, mask=mask)
                 with frame_lock:
                     latest_frame_rgb = rgb
@@ -262,6 +294,21 @@ def main() -> None:
             use_face_roi_mp = bool(app_data)
         dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi_mp)
 
+        # Preview and spectrum toggles
+        preview_enabled = True
+        spectrum_enabled = True
+
+        def on_preview(sender, app_data, user_data):
+            nonlocal preview_enabled
+            preview_enabled = bool(app_data)
+
+        def on_spectrum(sender, app_data, user_data):
+            nonlocal spectrum_enabled
+            spectrum_enabled = bool(app_data)
+
+        dpg.add_checkbox(label="Preview", default_value=True, callback=on_preview)
+        dpg.add_checkbox(label="Spectrum", default_value=False, callback=on_spectrum)
+
         # Camera selection
         # Avoid probing devices to prevent triggering Continuity Camera side-effects.
         camera_options = ["0", "1"] if _sys.platform == "darwin" else [str(i) for i in range(3)]
@@ -318,11 +365,25 @@ def main() -> None:
 
         # Spectrum plot (magnitude vs Hz)
         plot_tag = "spectrum_plot"
-        series_tag = "spectrum_series"
+        series_line_tag = "spectrum_line"
+        series_bar_tag = "spectrum_bar"
         with dpg.plot(label="Spectrum", height=200, width=-1, tag=plot_tag):
             dpg.add_plot_axis(dpg.mvXAxis, label="Hz")
             y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Mag")
-            dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_tag)
+            dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_line_tag)
+            dpg.add_bar_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_bar_tag)
+            dpg.configure_item(series_bar_tag, show=False)
+
+        # Spectrum mode: Bars (safer) or Line
+        spectrum_mode = "Bars"
+        def on_spec_mode(sender, app_data, user_data):
+            nonlocal spectrum_mode
+            spectrum_mode = app_data
+            # Toggle visibility
+            dpg.configure_item(series_bar_tag, show=(spectrum_mode == "Bars"))
+            dpg.configure_item(series_line_tag, show=(spectrum_mode == "Line"))
+        dpg.add_combo(("Bars", "Line"), default_value=spectrum_mode, label="Spectrum Mode",
+                      callback=on_spec_mode)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -340,15 +401,16 @@ def main() -> None:
         # Update preview
         with frame_lock:
             frame = latest_frame_rgb.copy() if latest_frame_rgb is not None else None
-        if frame is not None:
+        if frame is not None and preview_enabled:
             # Ensure size matches texture; resize if camera differs
             if frame.shape[0] != height or frame.shape[1] != width:
                 frame = cv2.resize(frame, (width, height))
-            rgba = np.concatenate(
-                [frame.astype(np.float32) / 255.0, np.ones((height, width, 1), dtype=np.float32)],
-                axis=2,
-            ).ravel()
-            dpg.set_value(tex_tag, rgba)
+            try:
+                alpha = np.ones((height, width, 1), dtype=np.float32)
+                rgba = np.concatenate([frame.astype(np.float32) / 255.0, alpha], axis=2).ravel()
+                dpg.set_value(tex_tag, rgba)
+            except Exception:
+                pass
         # Update BPM/SNR
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
         dpg.set_value(snr_text, f"SNR: {snr_value:.1f} dB")
@@ -361,24 +423,73 @@ def main() -> None:
             fs_est = 0.0
         conn = "on" if connected else "off"
         dpg.set_value(status_text, f"Status: conn={conn} dev={selected_device} fs~{fs_est:.1f}Hz")
-        # Update spectrum series if available
-        # Recompute minimal spectrum from latest buffer for display purpose
-        if len(T_buf) >= 8:
-            t = np.array(T_buf, dtype=np.float64)
-            fs = 1.0 / np.median(np.diff(t[-min(len(t), 50) :]))
-            L = max(8, int(win_sec * fs))
-            if len(R_buf) >= L:
-                R = np.array(list(R_buf)[-L:], dtype=np.float32)
-                G = np.array(list(G_buf)[-L:], dtype=np.float32)
-                B = np.array(list(B_buf)[-L:], dtype=np.float32)
-                Rn = bandpass(moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax)
-                Gn = bandpass(moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax)
-                Bn = bandpass(moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax)
-                s = pos_signal(Rn, Gn, Bn) if algo == "POS" else chrom_signal(Rn, Gn, Bn)
-                x = (s - s.mean()) * np.hanning(s.size).astype(np.float32)
-                X = np.fft.rfft(x)
-                freqs = np.fft.rfftfreq(s.size, d=1.0 / fs)
-                dpg.set_value(series_tag, [freqs.tolist(), np.abs(X).tolist()])
+        # Update spectrum series if available (throttled and downsampled)
+        # Recompute spectrum from latest buffer for display purpose
+        if spectrum_enabled and len(T_buf) >= 8:
+            # Throttle updates to reduce GL load
+            if not hasattr(ui_update_callback, "_spec_counter"):
+                ui_update_callback._spec_counter = 0  # type: ignore[attr-defined]
+            ui_update_callback._spec_counter += 1  # type: ignore[attr-defined]
+            spectrum_interval_frames = 60  # ~1 Hz if frame callback ~60 FPS
+            if ui_update_callback._spec_counter % spectrum_interval_frames == 0:  # type: ignore[attr-defined]
+                t = np.array(T_buf, dtype=np.float64)
+                fs = 1.0 / np.median(np.diff(t[-min(len(t), 50) :]))
+                L = max(8, int(win_sec * fs))
+                if len(R_buf) >= L:
+                    R = np.array(list(R_buf)[-L:], dtype=np.float32)
+                    G = np.array(list(G_buf)[-L:], dtype=np.float32)
+                    B = np.array(list(B_buf)[-L:], dtype=np.float32)
+                    Rn = bandpass(
+                        moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax
+                    )
+                    Gn = bandpass(
+                        moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax
+                    )
+                    Bn = bandpass(
+                        moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax
+                    )
+                    s = pos_signal(Rn, Gn, Bn) if algo == "POS" else chrom_signal(Rn, Gn, Bn)
+                    x = (s - s.mean()) * np.hanning(s.size).astype(np.float32)
+                    X = np.fft.rfft(x)
+                    freqs = np.fft.rfftfreq(s.size, d=1.0 / fs)
+                    mag = np.abs(X)
+                    # Sanitize and downsample to max_points
+                    max_points = 256
+                    if mag.size > 0 and freqs.size == mag.size:
+                        # Remove non-finite
+                        mag = np.nan_to_num(mag, nan=0.0, posinf=0.0, neginf=0.0)
+                        if freqs.size > max_points:
+                            idx = np.linspace(0, freqs.size - 1, max_points).astype(int)
+                            freqs_ds = freqs[idx]
+                            mag_ds = mag[idx]
+                        else:
+                            freqs_ds = freqs
+                            mag_ds = mag
+                        try:
+                            if spectrum_mode == "Line":
+                                dpg.configure_item(series_bar_tag, show=False)
+                                dpg.configure_item(series_line_tag, show=True)
+                                dpg.set_value(series_line_tag, [freqs_ds.tolist(), mag_ds.tolist()])
+                            else:
+                                # Bars: keep points limited for stability
+                                dpg.configure_item(series_line_tag, show=False)
+                                dpg.configure_item(series_bar_tag, show=True)
+                                # Further reduce to 64 bars for safety
+                                if freqs_ds.size > 64:
+                                    idx2 = np.linspace(0, freqs_ds.size - 1, 64).astype(int)
+                                    fx = freqs_ds[idx2]
+                                    my = mag_ds[idx2]
+                                else:
+                                    fx = freqs_ds
+                                    my = mag_ds
+                                dpg.set_value(series_bar_tag, [fx.tolist(), my.tolist()])
+                        except Exception:
+                            # On persistent failures, hide spectrum series to avoid crashes
+                            try:
+                                dpg.configure_item(series_line_tag, show=False)
+                                dpg.configure_item(series_bar_tag, show=False)
+                            except Exception:
+                                pass
 
     # Schedule periodic UI updates (~10 Hz) using frame callbacks
     def schedule_ui_updates(interval_frames: int = 6) -> None:

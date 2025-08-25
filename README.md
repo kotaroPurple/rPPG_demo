@@ -14,7 +14,7 @@ Notes
 ### Features
 - Camera preview (OpenCV) with ROI (MediaPipe face-detection; cheeks + forehead).
 - rPPG pipeline: normalize → band-pass → POS/CHROM → BPM.
-- Spectrum plot and SNR indicator.
+- SNR indicator and optional Spectrum plot (default OFF for stability).
 - Recording (CSV + JSON meta) under `runs/<timestamp>/`.
 
 ### Controls
@@ -32,3 +32,8 @@ Notes
 - Tests (non-GUI): `uv run task test`
 - Style: Ruff with line-length 100
 - Source layout: `src/`; tasks handled via `taskipy` (`uv run task -l`)
+
+### Troubleshooting
+- macOS Continuity Camera: If iPhone camera attaches automatically and causes instability, disable Continuity Camera in macOS/iPhone Handoff settings, or select the built-in camera (Camera=0/1) before connecting.
+- Spectrum plot: On some systems the spectrum drawing can crash GPU drivers. Keep Spectrum OFF (default) or use Bars mode. Updates are throttled and downsampled, but if issues persist, leave Spectrum OFF.
+- Logs: Check `logs/app.log` and `logs/faulthandler.log` for diagnostics.
