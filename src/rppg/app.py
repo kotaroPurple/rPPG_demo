@@ -58,7 +58,7 @@ def main() -> None:
 
     # Config
     width, height, fps_target = 1280, 720, 30
-    win_sec = 3.0
+    win_sec = 8.0
     fmin, fmax = 0.7, 2.0  # default upper bound 120 BPM for stability
     algo = "POS"  # or CHROM
     estimator = "FFT"  # FFT | ACF | Hilbert-IF | Tracker(FFT|ACF|IF)
