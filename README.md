@@ -5,7 +5,7 @@ This repository implements remote photoplethysmography (rPPG) based on the TBME 
 ### Quick Start
 - Create venv and sync deps: `uv sync`
 - Lint/format: `uv run task lint` / `uv run task fmt`
-- Run app: `uv run task run`
+- Run app: `uv run task run` (or `uv run python -m rppg.app`)
 - Web service: `uv run task serve` → http://127.0.0.1:8000/metrics
 
 Notes
@@ -15,12 +15,13 @@ Notes
 ### Features
 - Camera preview (OpenCV) with ROI (MediaPipe face-detection; cheeks + forehead).
 - rPPG pipeline: normalize → band-pass → POS/CHROM → BPM.
-- SNR indicator and optional Spectrum plot (default OFF for stability).
+- SNR indicator, peak confidence, and optional Spectrum plot (default OFF for stability).
 - Recording (CSV + JSON meta) under `runs/<timestamp>/`.
 
 ### Controls
 - Algorithm: POS / CHROM
-- Window (s), Band min/max (Hz)
+- Window (s): waveform X-axis = −win..0 sec
+- Band min/max (Hz)
 - Record (CSV): toggle to start/stop (meta saved on stop)
 
 ### Docs
@@ -34,6 +35,7 @@ Notes
 - Style: Ruff with line-length 100
 - Source layout: `src/`; tasks handled via `taskipy` (`uv run task -l`)
 
+- UI: Plots avoid scrolling. Waveform Y-axis is fixed at ±0.005; BPM timeline Y-axis fixed at 40–120 BPM.
 - Filtering: For embedded stability, band-pass uses `lfilter` (causal). Zero-phase is not applied by design.
 ### Troubleshooting
 - macOS Continuity Camera: If iPhone camera attaches automatically and causes instability, disable Continuity Camera in macOS/iPhone Handoff settings, or select the built-in camera (Camera=0/1) before connecting.
