@@ -366,7 +366,7 @@ def main() -> None:
                 dpg.add_text("Camera Preview")
                 # Display scaled-up size regardless of internal texture size
                 # Fit without scrolling: slightly smaller than full width, 16:9
-                dpg.add_image(tex_tag, width=880, height=495)
+                dpg.add_image(tex_tag, width=900, height=540)
                 dpg.add_spacer(height=6)
                 with dpg.group(horizontal=True):
                     bpm_text = dpg.add_text("BPM: --")
@@ -425,7 +425,7 @@ def main() -> None:
                     dpg.configure_item(series_bar_tag, show=False)
             # Right panel: Controls
             controls_panel_tag = "controls_panel"
-            with dpg.child_window(width=340, height=820, tag=controls_panel_tag):
+            with dpg.child_window(width=340, height=860, tag=controls_panel_tag):
                 dpg.add_text("Controls")
         # Controls
         def on_algo(sender, app_data, user_data):
