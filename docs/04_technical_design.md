@@ -18,6 +18,20 @@
 8) RR推定: rPPG包絡の低周波を解析し BrPM を推定（`respiration.py`）
 9) UI表示: プレビュー、rPPG波形、BPMタイムライン、RR、品質指標、各種設定（`app.py`）
 
+```mermaid
+flowchart LR
+  CAP[Capture\nOpenCV] --> RGB[ROI Mean RGB]
+  subgraph ROI/Pre
+    ROI[Face ROI\nHaar/MediaPipe]
+    PRE[Normalize +\nBand-pass]
+  end
+  RGB --> ROI --> PRE --> COL[CHROM/POS\nrPPG]
+  COL -->|HR band| HR[rPPG HR Estimators\nFFT/ACF/Hilbert-IF/Tracker]
+  COL -->|Envelope| RR[Respiration\nEnvelope + Peak]
+  HR --> UI[UI: BPM Timeline, Metrics]
+  RR --> UI
+```
+
 ---
 
 ## 2. 前処理（`preprocess.py`）
@@ -73,6 +87,19 @@ CHROM/POS は Wang, Stuijk, de Haan (TBME 2016) に基づく。R,G,B の正規�
 - predict(dt): x←F·x, P←F·P·F^T+Q。update(z): K = P·H^T(S^−1), x←x+K(y)。
 - 長所: 非定常/外乱に対して平滑に追従。短所: パラメータ（Q/R）の整合が必要。
 
+```mermaid
+flowchart TD
+  s[rPPG s(t)] -->|Estimator| z[Measurement f_meas]
+  z -->|quality→R| KF[FreqTracker\n(f, f_dot)]
+  KF --> bpm[BPM = 60·f]
+  subgraph Quality
+    SNR[SNR]
+    CONF[Peak Confidence]
+  end
+  SNR --> KF
+  CONF --> KF
+```
+
 ---
 
 ## 5. 品質指標（`quality.py`）
@@ -89,6 +116,17 @@ CHROM/POS は Wang, Stuijk, de Haan (TBME 2016) に基づく。R,G,B の正規�
 - 代替: ACF/IF/Tracker を envelope に適用可能（将来的に拡張）。
 - UI: RR を BPM/SNR/Conf と同列で表示。デバッグ用に envelope 波形を −win..0 秒で表示。
 
+```mermaid
+sequenceDiagram
+  participant Core as rPPG Core
+  participant Env as Envelope
+  participant RR as RR Estimator
+  Core->>Env: s(t) (band-limited)
+  Env->>RR: |hilbert(s)| (envelope)
+  RR->>RR: FFT peak in 0.1–0.5 Hz
+  RR-->>UI: BrPM + envelope waveform
+```
+
 ---
 
 ## 7. UIとリアルタイム動作（`app.py`）
@@ -101,6 +139,19 @@ CHROM/POS は Wang, Stuijk, de Haan (TBME 2016) に基づく。R,G,B の正規�
   - Respiration波形（包絡; X軸 −win..0 固定）
 - スペクトル表示: 安定性のためUIから一時的に無効化（要求に応じて再有効化）。
 - ウィンドウ長: 1–15秒。初期値8秒。RR安定化に有効。
+
+```mermaid
+flowchart LR
+  subgraph Threads
+    CAPT[Capture Thread]
+    PROC[Processing Thread]
+    VIEW[UI Main]
+  end
+  CAPT -->|frame, ts| PROC
+  PROC -->|bpm, snr, conf, rr| VIEW
+  PROC -->|waveform, envelope| VIEW
+  VIEW -->|controls| PROC
+```
 
 ---
 
@@ -135,4 +186,3 @@ CHROM/POS は Wang, Stuijk, de Haan (TBME 2016) に基づく。R,G,B の正規�
 - `rppg/quality.py`: SNR/ピーク信頼度
 - `rppg/respiration.py`: 呼吸包絡とRR推定
 - `rppg/app.py`: UI/制御ロジック統合
-
