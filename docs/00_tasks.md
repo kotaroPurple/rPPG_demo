@@ -29,10 +29,10 @@
 - [x] `quality.py`: SNR/ピーク信頼度算出
 - [x] `recorder.py`: CSV/JSON 非同期保存
 - [x] `app.py`（DearPyGUI）: プレビュー、波形/スペクトル、BPM/品質、設定
-- [ ] ACFベースのBPM推定（短窓対応） `acf_bpm.py`
-- [ ] ヒルベルト瞬時周波数推定 `hilbert_if.py`
-- [ ] 周波数トラッカー（カルマン/α-β） `tracker.py`（観測=FFT/ACF/IF 選択式）
-- [ ] UIに Estimator 選択（FFT/ACF/Hilbert-IF/KF-Tracker）を追加
+- [x] ACFベースのBPM推定（短窓対応） `acf_bpm.py`
+- [x] ヒルベルト瞬時周波数推定 `hilbert_if.py`
+- [x] 周波数トラッカー（カルマン/α-β） `tracker.py`（観測=FFT/ACF/IF 選択式）
+- [x] UIに Estimator 選択（FFT/ACF/Hilbert-IF/KF-Tracker）を追加
 
 ### Web連携（将来・現時点では非実施）
 - [ ] `service.py`: FastAPI + WebSocket でメトリクス配信
