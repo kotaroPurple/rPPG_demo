@@ -562,7 +562,7 @@ def main() -> None:
         dpg.add_combo(("POS", "CHROM"), default_value=algo, label="Algorithm",
                       callback=on_algo, parent=controls_panel_tag)
         dpg.add_slider_float(label="Window (s)", default_value=win_sec,
-                             min_value=1.0, max_value=5.0, callback=on_win,
+                             min_value=1.0, max_value=15.0, callback=on_win,
                              parent=controls_panel_tag)
         dpg.add_slider_float(label="Band min (Hz)", default_value=fmin,
                              min_value=0.2, max_value=2.0, callback=on_band_min,
