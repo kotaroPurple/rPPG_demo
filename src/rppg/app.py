@@ -367,11 +367,15 @@ def main() -> None:
                 # Display scaled-up size regardless of internal texture size
                 # Fit without scrolling: slightly smaller than full width, 16:9
                 dpg.add_image(tex_tag, width=880, height=495)
-                dpg.add_spacer(height=8)
-                bpm_text = dpg.add_text("BPM: --")
-                snr_text = dpg.add_text("SNR: -- dB")
-                conf_text = dpg.add_text("Conf: --")
-                status_text = dpg.add_text("Status: idle")
+                dpg.add_spacer(height=6)
+                with dpg.group(horizontal=True):
+                    bpm_text = dpg.add_text("BPM: --")
+                    dpg.add_spacer(width=12)
+                    snr_text = dpg.add_text("SNR: -- dB")
+                    dpg.add_spacer(width=12)
+                    conf_text = dpg.add_text("Conf: --")
+                    dpg.add_spacer(width=12)
+                    status_text = dpg.add_text("Status: idle")
                 # Plots area without scrolling: place two plots side-by-side
                 with dpg.group(horizontal=True):
                     # rPPG waveform (pre-BPM signal)
