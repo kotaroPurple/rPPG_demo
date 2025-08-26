@@ -1,6 +1,6 @@
 ## rPPG デスクトップ/ブラウザ対応 設計
 
-最終更新: 2025-08-24
+最終更新: 2025-08-26
 
 本設計は uv + DearPyGUI を前提に、将来的なブラウザUI対応（Web）も見据えた拡張可能なアーキテクチャを示す。内蔵カメラから rPPG（CHROM/POS）を推定し BPM を表示・保存する。
 
@@ -44,7 +44,13 @@ sequenceDiagram
 - UIスレッドは描画と操作に限定。処理はWorkerで実行（`queue.Queue` で受け渡し）。
 - 設定変更はスレッドセーフな共有構造（`dataclasses` + `threading.Lock`）で反映。
 
-### Web 経路の追加（将来）
+### キュー/同期の詳細
+- フレーム受け渡し: `queue.Queue[maxsize=2]`（上書き/最新優先のため `put_nowait` + `get_nowait` で間引き）
+- サンプル受け渡し: `collections.deque(maxlen=N_win*fps*1.5)`（窓長の1.5倍余裕）
+- UIイベント: `Queue` でメトリクスをバースト抑制（200msデバウンス）して描画スレッドに送出
+- ストップシグナル: `threading.Event`（`stop_event.is_set()` を各ループで監視）
+
+### Web 経路の追加（将来・現時点では非実施）
 ```mermaid
 sequenceDiagram
   participant Br as Browser (Web UI)
@@ -59,8 +65,8 @@ sequenceDiagram
     Svc->>Proc: enqueue samples/frames
   end
 ```
-- 近接/ローカル運用ではコアがカメラを直接使用し、Browser はメトリクス受信主体。
-- ブラウザでの映像取得が必要な場合は `getUserMedia` → `RTC/WS` で平均RGBや低ビットレート映像を送信し、帯域を節約。
+- 近接/ローカル運用ではコアがカメラを直接使用し、Browser はメトリクス受信主体。（現時点ではWeb連携は非実施）
+- ブラウザでの映像取得が必要な場合は `getUserMedia` → `RTC/WS` を想定。（将来検討）
 
 ## モジュール構成（`src/` 提案）
 ```
@@ -81,15 +87,84 @@ web/
   frontend/          # 将来: Web UI（静的アセット or SPA）
 ```
 
+## コンポーネント責務（概要）
+- `capture.py`: デバイス列挙、解像度/FPS設定、BGR→RGB変換、タイムスタンプ付与。
+- `roi.py`: MediaPipe により顔矩形/ランドマーク抽出、頬/額マスク生成、安定化（前回追従）。
+- `preprocess.py`: DC除去（移動平均）とバンドパス（IIR推奨）、正規化スケーリング。
+- `chrom.py` / `pos.py`: 時系列RGBから単一rPPG信号へ合成、数式は 02 を遵守。
+- `bpm.py`: スペクトル推定、ピーク選択、BPM平滑化（EMA/メディアン）。
+- `quality.py`: SNR、有効ピーク幅、トラッキング一貫性から品質メトリクスを算出。
+- `recorder.py`: CSV/JSON メタの非同期書込、ローテーション、クラッシュ安全化（flush）。
+- `app.py`: DearPyGUI 初期化、イベント配線、ワーカー起動/停止、描画更新の節流制御。
+- `service.py`: FastAPI + WS、現在値取得、購読管理、CORS/レート制御。
+
+## インターフェース/関数シグネチャ（案）
+```python
+# capture.py
+@dataclass
+class CaptureConfig:
+    device: int = 0
+    width: int = 640
+    height: int = 480
+    fps: float = 30.0
+
+class Camera:
+    def __init__(self, cfg: CaptureConfig): ...
+    def start(self) -> None: ...  # spawn thread
+    def stop(self) -> None: ...
+    def read(self) -> tuple[np.ndarray, float] | None: ...  # (BGR, ts)
+
+# roi.py
+@dataclass
+class RoiResult:
+    mask: np.ndarray  # HxW bool
+    landmarks: np.ndarray | None
+    valid: bool
+
+def compute_roi(frame_bgr: np.ndarray) -> RoiResult: ...
+def mean_rgb(frame_bgr: np.ndarray, mask: np.ndarray) -> tuple[float, float, float]: ...
+
+# preprocess.py
+def normalize_moving_mean(x: np.ndarray, win_sec: float, fs: float) -> np.ndarray: ...
+def bandpass_iir(x: np.ndarray, fs: float, lo: float, hi: float, order: int = 2) -> np.ndarray: ...
+
+# chrom.py / pos.py
+def chrom_signal(r: np.ndarray, g: np.ndarray, b: np.ndarray) -> np.ndarray: ...
+def pos_signal(r: np.ndarray, g: np.ndarray, b: np.ndarray) -> np.ndarray: ...
+
+# bpm.py
+@dataclass
+class BpmResult:
+    bpm: float | None
+    peak_hz: float | None
+    spectrum_hz: np.ndarray
+    spectrum_amp: np.ndarray
+
+def estimate_bpm(sig: np.ndarray, fs: float, bpm_min: float, bpm_max: float) -> BpmResult: ...
+
+# quality.py
+@dataclass
+class Quality:
+    snr: float
+    peak_width_hz: float
+    confidence: float  # 0..1
+
+def estimate_quality(spectrum_hz: np.ndarray, spectrum_amp: np.ndarray, peak_hz: float) -> Quality: ...
+
+# recorder.py
+class Recorder:
+    def start(self, run_dir: Path, meta: dict) -> None: ...
+    def write(self, t: float, r: float, g: float, b: float, s: float | None, bpm: float | None, snr: float | None) -> None: ...
+    def stop(self) -> None: ...
+```
+
 ## データモデル
 - Frame: `np.ndarray(BGR)`, `timestamp: float`
 - RoiResult: `mask(s)`, `valid: bool`, `landmarks`
 - Sample: `mean_rgb: (R,G,B)`, `timestamp`
 - WindowResult: `signal: np.ndarray`, `bpm: float`, `snr: float`, `peak_f: float`
-### Web API（JSON例）
-- Subscribe: `{ "action": "start", "algo": "pos", "band": [0.7,4.0], "win": 2.0, "step": 1.0 }`
-- Metrics push: `{ "t": 1735123.10, "bpm": 72.4, "snr": 5.8, "fps": 29.7 }`
-- Optional signal chunk: `{ "t0": 1735123.0, "dt": 0.033, "signal": [..] }`
+### Web API（将来・現時点では非実施）
+- JSONメッセージ、REST/WS エンドポイント案は将来検討とし、現段階の実装範囲外。
 
 ## 信号処理設計
 - 正規化: $x_n(t) = x(t)/\overline{x}(t) - 1$（窓内移動平均）
@@ -99,30 +174,68 @@ web/
   - POS: $X=G_n-B_n,\ Y=-2R_n+G_n+B_n,\ s=X+\alpha Y$
 - BPM: 心拍帯域でFFTピーク→連続窓で平滑化（メディアン/EMA）
 
+### 実装ノート
+- ゼロ位相フィルタはリアルタイム性と遅延の観点から原則不使用（非因果フィルタ禁止）。
+- `fs` は実測FPSに追従（移動平均で平滑）。`fs < 20` の場合は上限BPMを自動縮小。
+
 ## UI レイアウト（DearPyGUI）
 - 左: カメラプレビュー（ROI枠/マスク重畳）
-- 右上: BPM, SNR, FPS
-- 右中: 波形プロット、下: スペクトル
-- 右下: 設定パネル（アルゴリズム、窓長/ステップ、帯域、BPM範囲、記録）
-### Web UI の考慮
-- 同レイアウトをWebでも踏襲（Canvas/Chartで波形/スペクトル）。
-- 初期はメトリクス推移＋現在値の可視化から開始、後にROIプレビューを追加。
+- 右上: 現在値（BPM, SNR, FPS）
+- 右中: rPPG波形プロット（BPM算出前の信号）
+- 右下: スペクトル（任意/オフ既定）
+- 右パネル: 設定（アルゴリズム、窓長/ステップ、帯域、BPM範囲、記録）
+- 別タブ/小パネル: 推定BPMの時系列プロット（移動窓で更新）
+### Web UI の考慮（将来・現時点では非実施）
+- 同レイアウトをWebでも踏襲予定（Canvas/Chart）。現段階では範囲外。
+
+## 設定/パラメータ（UI/Service 共通キー）
+- `algo`: `"pos" | "chrom"`
+- `win_sec`: 窓長（秒）、既定 2.0
+- `step_sec`: ステップ（秒）、既定 1.0
+- `band_hz`: `[lo, hi]`、既定 `[0.7, 4.0]`
+- `bpm_range`: `[42, 240]`
+- `camera`: `device:int, width:int, height:int, fps:float`
+- `record`: `on:bool, dir:str`
 
 ## 主要パラメータ（初期値）
 - 窓長/ステップ: 2.0s / 1.0s（50%重なり）
 - 帯域: 0.7–4.0 Hz、BPM範囲: 42–240
 - ROI: 頬×2＋額、重み=面積 or 分散逆数
 
+## パフォーマンス目標/計測
+- UIプレビュー: 24–30 FPS を維持（プレビューは別間引き可）。
+- 処理遅延: ステップ毎の処理を 20 ms 以内（平均）に収める。
+- CPU/GPU使用率: ノートPCで CPU < 60% を目安。
+- 計測: `time.perf_counter` と移動平均でメトリクス化、`logs/` に定期出力。
+
 ## エラーハンドリング
 - カメラ未接続/権限: UI通知＋再試行
 - 顔未検出: 前回ROI保持→タイムアウトで停止/再検出
 - FPS不足: 自動ダウンサンプリング、BPM上限を `0.45×FPS` に制限
+
+### 障害時リカバリ
+- ワーカースレッド例外はキャッチして UI に通知、再起動ボタンを提示。
+- Recorder 書込失敗時はリトライ（指数バックオフ）、最悪ケースは記録停止のみ行い処理継続。
 
 ## ログ/保存
 - CSV: `timestamp,R,G,B,signal,bpm,snr`
 - JSONメタ: 設定、開始/終了時刻、デバイス情報
 ### Web 配信
 - ライブメトリクスは WS 経由、履歴はバックエンドから JSON/CSV ダウンロードを提供。
+
+### フォーマット詳細
+- CSV は RFC4180 準拠、`decimal='.'`、ヘッダ1行、行末LF。
+- JSONメタは `runs/<ts>/meta.json` に保存し、`schema_version` を付与。
+
+## セキュリティ/プライバシー（将来・現時点では非実施）
+- Webサービス運用やCORS設定などは将来検討。現段階ではデスクトップアプリ内での処理に限定。
+- 収集データ最小化の原則（動画の保存回避、平均RGB中心）は参考方針として維持。
+
+## テスト戦略
+- ユニット: `preprocess/chrom/pos/bpm/quality` を合成サンプルで検証（決定論的）。
+- モック: カメラ/ROI は固定フレーム/マスクを返すスタブで置換。
+- カバレッジ: コア処理で ≥80%。GUI/カメラI/O は対象外。
+- 回帰: 合成正弦波 + ノイズで既知BPMに収束することを確認。
 
 ## 将来拡張
 - マルチパッチのロバスト合成（RANSAC/重み最適化）

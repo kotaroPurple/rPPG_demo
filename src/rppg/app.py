@@ -81,6 +81,13 @@ def main() -> None:
     T_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     bpm_value = 0.0
     snr_value = 0.0
+    # Waveform buffer (latest processed window) and BPM timeline
+    wave_lock = threading.Lock()
+    wave_t_ds: Optional[list[float]] = None
+    wave_y_ds: Optional[list[float]] = None
+    bpm_hist_lock = threading.Lock()
+    bpm_hist_t: Deque[float] = deque(maxlen=240)  # ~4 min at 1 Hz
+    bpm_hist_y: Deque[float] = deque(maxlen=240)
     # Shared spectrum data (processing thread produces, UI consumes)
     spec_lock = threading.Lock()
     spec_freqs_ds: Optional[list[float]] = None
@@ -123,7 +130,11 @@ def main() -> None:
                     continue
                 # Reopen capture if device or resolution changed or not opened
                 desired_res = res_options.get(selected_res_name, (width, height))
-                if (current_dev != selected_device) or (cap_wrap is None) or (desired_res != (width, height)):
+                if (
+                    (current_dev != selected_device)
+                    or (cap_wrap is None)
+                    or (desired_res != (width, height))
+                ):
                     # Close previous
                     try:
                         if cap_wrap is not None:
@@ -215,7 +226,7 @@ def main() -> None:
 
     # Processing thread
     def processing_loop() -> None:
-        nonlocal bpm_value, snr_value, spec_freqs_ds, spec_mag_ds
+        nonlocal bpm_value, snr_value, spec_freqs_ds, spec_mag_ds, wave_t_ds, wave_y_ds
         while running:
             if not connected:
                 time.sleep(0.1)
@@ -256,6 +267,25 @@ def main() -> None:
             snr_value = snr_db(mag, idx)  # used in UI update
             bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
             bpm_value = bpm
+            # Update BPM timeline (1 point per processing tick ~10Hz throttled later in UI)
+            with bpm_hist_lock:
+                bpm_hist_t.append(time.time())
+                bpm_hist_y.append(float(bpm_value))
+            # Prepare waveform downsample for UI (time in seconds, centered at 0)
+            if s.size > 0:
+                t_rel = (np.arange(s.size, dtype=np.float32) - (s.size - 1)) / float(fs)
+                # Downsample to at most 256 points for UI
+                max_points = 256
+                if s.size > max_points:
+                    idx_ds = np.linspace(0, s.size - 1, max_points).astype(int)
+                    t_ds = t_rel[idx_ds].tolist()
+                    y_ds = s[idx_ds].tolist()
+                else:
+                    t_ds = t_rel.tolist()
+                    y_ds = s.tolist()
+                with wave_lock:
+                    wave_t_ds = t_ds
+                    wave_y_ds = y_ds
             # Write lightweight metrics snapshot (for external service/debug)
             try:
                 import json as _json
@@ -293,7 +323,7 @@ def main() -> None:
 
     # UI setup
     dpg.create_context()
-    dpg.create_viewport(title="rPPG Demo", width=1280, height=900)
+    dpg.create_viewport(title="rPPG Demo", width=1280, height=950)
 
     # Texture for preview (RGBA float)
     tex_tag = "preview_tex"
@@ -329,7 +359,7 @@ def main() -> None:
     with dpg.window(tag=primary_tag, label="rPPG Demo", width=1260, height=860):
         with dpg.group(horizontal=True):
             # Left panel: Preview + Spectrum
-            with dpg.child_window(width=900, height=820):
+            with dpg.child_window(width=900, height=900):
                 dpg.add_text("Camera Preview")
                 # Display scaled-up size regardless of internal texture size
                 dpg.add_image(tex_tag, width=900, height=675)
@@ -337,17 +367,35 @@ def main() -> None:
                 bpm_text = dpg.add_text("BPM: --")
                 snr_text = dpg.add_text("SNR: -- dB")
                 status_text = dpg.add_text("Status: idle")
+                # rPPG waveform (pre-BPM signal)
+                wave_plot_tag = "wave_plot"
+                wave_series_tag = "wave_series"
+                with dpg.plot(label="rPPG Waveform (sec)", height=150, width=-1, tag=wave_plot_tag):
+                    dpg.add_plot_axis(dpg.mvXAxis, label="t (s)")
+                    y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="amp")
+                    dpg.add_line_series(
+                        [0.0, 1.0], [0.0, 0.0], parent=y_axis_w, tag=wave_series_tag
+                    )
                 # Spectrum plot (magnitude vs Hz)
                 plot_tag = "spectrum_plot"
                 series_line_tag = "spectrum_line"
                 series_bar_tag = "spectrum_bar"
-                with dpg.plot(label="Spectrum", height=220, width=-1, tag=plot_tag):
+                with dpg.plot(label="Spectrum", height=180, width=-1, tag=plot_tag):
                     dpg.add_plot_axis(dpg.mvXAxis, label="Hz")
                     y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Mag")
                     dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_line_tag)
                     dpg.add_bar_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_bar_tag)
                     dpg.configure_item(series_line_tag, show=False)
                     dpg.configure_item(series_bar_tag, show=False)
+                # BPM timeline plot
+                bpm_plot_tag = "bpm_plot"
+                bpm_series_tag = "bpm_series"
+                with dpg.plot(label="BPM Timeline", height=150, width=-1, tag=bpm_plot_tag):
+                    dpg.add_plot_axis(dpg.mvXAxis, label="time")
+                    y_axis_bpm = dpg.add_plot_axis(dpg.mvYAxis, label="BPM")
+                    dpg.add_line_series(
+                        [0.0, 1.0], [0.0, 0.0], parent=y_axis_bpm, tag=bpm_series_tag
+                    )
             # Right panel: Controls
             with dpg.child_window(width=340, height=820):
                 dpg.add_text("Controls")
@@ -381,8 +429,12 @@ def main() -> None:
             nonlocal selected_res_name
             selected_res_name = app_data
         try:
-            dpg.add_combo(list(res_options.keys()), default_value=selected_res_name, label="Resolution",
-                          callback=on_res)
+            dpg.add_combo(
+                list(res_options.keys()),
+                default_value=selected_res_name,
+                label="Resolution",
+                callback=on_res,
+            )
         except Exception:
             pass
         def on_roi_cv(sender, app_data, user_data):
@@ -606,7 +658,7 @@ def main() -> None:
                                 my = mag_ds[idx2]
                             else:
                                 fx = freqs_ds
-                                my = mag_ds
+                            my = mag_ds
                             dpg.set_value(series_bar_tag, [fx.tolist(), my.tolist()])
                         except Exception:
                             try:
@@ -614,6 +666,33 @@ def main() -> None:
                                 dpg.configure_item(series_line_tag, show=False)
                             except Exception:
                                 pass
+        # Update rPPG waveform plot (lightweight)
+        try:
+            with wave_lock:
+                if wave_t_ds and wave_y_ds:
+                    dpg.set_value(wave_series_tag, [wave_t_ds, wave_y_ds])
+        except Exception:
+            pass
+        # Update BPM timeline (throttle to ~2 Hz)
+        if not hasattr(ui_update_callback, "_bpm_counter"):
+            ui_update_callback._bpm_counter = 0  # type: ignore[attr-defined]
+        ui_update_callback._bpm_counter += 1  # type: ignore[attr-defined]
+        if ui_update_callback._bpm_counter % 5 == 0:  # type: ignore[attr-defined]
+            try:
+                with bpm_hist_lock:
+                    if len(bpm_hist_t) >= 2:
+                        # Show last 90 seconds; convert to relative seconds
+                        t0 = bpm_hist_t[-1] - 90.0
+                        xs = [ti - t0 for ti in bpm_hist_t if ti >= t0]
+                        ys = [
+                            yv
+                            for ti, yv in zip(bpm_hist_t, bpm_hist_y, strict=False)
+                            if ti >= t0
+                        ]
+                        if len(xs) >= 2:
+                            dpg.set_value(bpm_series_tag, [xs, ys])
+            except Exception:
+                pass
 
     # Schedule periodic UI updates (~10 Hz) using frame callbacks
     def schedule_ui_updates(interval_frames: int = 6) -> None:
