@@ -359,25 +359,40 @@ def main() -> None:
     with dpg.window(tag=primary_tag, label="rPPG Demo", width=1260, height=860):
         with dpg.group(horizontal=True):
             # Left panel: Preview + Spectrum
-            with dpg.child_window(width=900, height=900):
+            with dpg.child_window(width=900, height=860):
                 dpg.add_text("Camera Preview")
                 # Display scaled-up size regardless of internal texture size
-                dpg.add_image(tex_tag, width=900, height=675)
+                # Fit without scrolling: slightly smaller than full width, 16:9
+                dpg.add_image(tex_tag, width=880, height=495)
                 dpg.add_spacer(height=8)
                 bpm_text = dpg.add_text("BPM: --")
                 snr_text = dpg.add_text("SNR: -- dB")
                 status_text = dpg.add_text("Status: idle")
-                # rPPG waveform (pre-BPM signal)
-                wave_plot_tag = "wave_plot"
-                wave_series_tag = "wave_series"
-                wave_y_axis_tag = "wave_y_axis"
-                with dpg.plot(label="rPPG Waveform (sec)", height=150, width=-1, tag=wave_plot_tag):
-                    dpg.add_plot_axis(dpg.mvXAxis, label="t (s)")
-                    y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="amp", tag=wave_y_axis_tag)
-                    dpg.add_line_series(
-                        [0.0, 1.0], [0.0, 0.0], parent=y_axis_w, tag=wave_series_tag
-                    )
-                # Spectrum plot (magnitude vs Hz)
+                # Plots area without scrolling: place two plots side-by-side
+                with dpg.group(horizontal=True):
+                    # rPPG waveform (pre-BPM signal)
+                    wave_plot_tag = "wave_plot"
+                    wave_series_tag = "wave_series"
+                    wave_y_axis_tag = "wave_y_axis"
+                    with dpg.plot(
+                        label="rPPG Waveform (sec)", height=170, width=430, tag=wave_plot_tag
+                    ):
+                        dpg.add_plot_axis(dpg.mvXAxis, label="t (s)")
+                        y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="amp", tag=wave_y_axis_tag)
+                        dpg.add_line_series(
+                            [0.0, 1.0], [0.0, 0.0], parent=y_axis_w, tag=wave_series_tag
+                        )
+                    # BPM timeline plot
+                    bpm_plot_tag = "bpm_plot"
+                    bpm_series_tag = "bpm_series"
+                    bpm_y_axis_tag = "bpm_y_axis"
+                    with dpg.plot(label="BPM Timeline", height=170, width=430, tag=bpm_plot_tag):
+                        dpg.add_plot_axis(dpg.mvXAxis, label="time")
+                        y_axis_bpm = dpg.add_plot_axis(dpg.mvYAxis, label="BPM", tag=bpm_y_axis_tag)
+                        dpg.add_line_series(
+                            [0.0, 1.0], [0.0, 0.0], parent=y_axis_bpm, tag=bpm_series_tag
+                        )
+                # Spectrum plot (magnitude vs Hz) — optional
                 plot_tag = "spectrum_plot"
                 series_line_tag = "spectrum_line"
                 series_bar_tag = "spectrum_bar"
@@ -388,16 +403,6 @@ def main() -> None:
                     dpg.add_bar_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_bar_tag)
                     dpg.configure_item(series_line_tag, show=False)
                     dpg.configure_item(series_bar_tag, show=False)
-                # BPM timeline plot
-                bpm_plot_tag = "bpm_plot"
-                bpm_series_tag = "bpm_series"
-                bpm_y_axis_tag = "bpm_y_axis"
-                with dpg.plot(label="BPM Timeline", height=150, width=-1, tag=bpm_plot_tag):
-                    dpg.add_plot_axis(dpg.mvXAxis, label="time")
-                    y_axis_bpm = dpg.add_plot_axis(dpg.mvYAxis, label="BPM", tag=bpm_y_axis_tag)
-                    dpg.add_line_series(
-                        [0.0, 1.0], [0.0, 0.0], parent=y_axis_bpm, tag=bpm_series_tag
-                    )
             # Right panel: Controls
             with dpg.child_window(width=340, height=820):
                 dpg.add_text("Controls")
