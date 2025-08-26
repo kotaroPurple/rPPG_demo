@@ -33,9 +33,13 @@ select = [
 [dependency-groups]
 dev = [
     "pytest>=8.4.1",
+    "pytest-cov>=5.0.0",
     "ruff>=0.12.10",
     "taskipy>=1.14.1",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-q --cov=rppg --cov-report=term --cov-fail-under=80"
 
 [tool.taskipy]
 
