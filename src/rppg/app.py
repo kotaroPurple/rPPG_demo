@@ -374,24 +374,36 @@ def main() -> None:
                     wave_plot_tag = "wave_plot"
                     wave_series_tag = "wave_series"
                     wave_y_axis_tag = "wave_y_axis"
+                    wave_x_axis_tag = "wave_x_axis"
                     with dpg.plot(
                         label="rPPG Waveform (sec)", height=170, width=430, tag=wave_plot_tag
                     ):
-                        dpg.add_plot_axis(dpg.mvXAxis, label="t (s)")
+                        dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag=wave_x_axis_tag)
                         y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="amp", tag=wave_y_axis_tag)
                         dpg.add_line_series(
                             [0.0, 1.0], [0.0, 0.0], parent=y_axis_w, tag=wave_series_tag
                         )
+                        try:
+                            dpg.set_axis_limits(wave_y_axis_tag, -0.005, 0.005)
+                            dpg.set_axis_limits(wave_x_axis_tag, -win_sec, 0.0)
+                        except Exception:
+                            pass
                     # BPM timeline plot
                     bpm_plot_tag = "bpm_plot"
                     bpm_series_tag = "bpm_series"
                     bpm_y_axis_tag = "bpm_y_axis"
+                    bpm_x_axis_tag = "bpm_x_axis"
                     with dpg.plot(label="BPM Timeline", height=170, width=430, tag=bpm_plot_tag):
-                        dpg.add_plot_axis(dpg.mvXAxis, label="time")
+                        dpg.add_plot_axis(dpg.mvXAxis, label="time", tag=bpm_x_axis_tag)
                         y_axis_bpm = dpg.add_plot_axis(dpg.mvYAxis, label="BPM", tag=bpm_y_axis_tag)
                         dpg.add_line_series(
                             [0.0, 1.0], [0.0, 0.0], parent=y_axis_bpm, tag=bpm_series_tag
                         )
+                        try:
+                            dpg.set_axis_limits(bpm_y_axis_tag, 40.0, 120.0)
+                            dpg.set_axis_limits(bpm_x_axis_tag, 0.0, 90.0)
+                        except Exception:
+                            pass
                 # Spectrum plot (magnitude vs Hz) — optional
                 plot_tag = "spectrum_plot"
                 series_line_tag = "spectrum_line"
@@ -404,7 +416,8 @@ def main() -> None:
                     dpg.configure_item(series_line_tag, show=False)
                     dpg.configure_item(series_bar_tag, show=False)
             # Right panel: Controls
-            with dpg.child_window(width=340, height=820):
+            controls_panel_tag = "controls_panel"
+            with dpg.child_window(width=340, height=820, tag=controls_panel_tag):
                 dpg.add_text("Controls")
         # Controls
         def on_algo(sender, app_data, user_data):
@@ -414,6 +427,11 @@ def main() -> None:
         def on_win(sender, app_data, user_data):
             nonlocal win_sec
             win_sec = float(app_data)
+            # Update waveform X-axis range to match fixed window
+            try:
+                dpg.set_axis_limits("wave_x_axis", -win_sec, 0.0)
+            except Exception:
+                pass
 
         def on_band_min(sender, app_data, user_data):
             nonlocal fmin
@@ -424,13 +442,16 @@ def main() -> None:
             fmax = float(app_data)
 
         dpg.add_combo(("POS", "CHROM"), default_value=algo, label="Algorithm",
-                      callback=on_algo)
+                      callback=on_algo, parent=controls_panel_tag)
         dpg.add_slider_float(label="Window (s)", default_value=win_sec,
-                             min_value=1.0, max_value=5.0, callback=on_win)
+                             min_value=1.0, max_value=5.0, callback=on_win,
+                             parent=controls_panel_tag)
         dpg.add_slider_float(label="Band min (Hz)", default_value=fmin,
-                             min_value=0.2, max_value=2.0, callback=on_band_min)
+                             min_value=0.2, max_value=2.0, callback=on_band_min,
+                             parent=controls_panel_tag)
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
-                             min_value=1.5, max_value=5.0, callback=on_band_max)
+                             min_value=1.5, max_value=5.0, callback=on_band_max,
+                             parent=controls_panel_tag)
         # Resolution selection
         def on_res(sender, app_data, user_data):
             nonlocal selected_res_name
@@ -441,18 +462,21 @@ def main() -> None:
                 default_value=selected_res_name,
                 label="Resolution",
                 callback=on_res,
+                parent=controls_panel_tag,
             )
         except Exception:
             pass
         def on_roi_cv(sender, app_data, user_data):
             nonlocal use_face_roi_cv
             use_face_roi_cv = bool(app_data)
-        dpg.add_checkbox(label="Use Face ROI (OpenCV)", default_value=False, callback=on_roi_cv)
+        dpg.add_checkbox(label="Use Face ROI (OpenCV)", default_value=False, callback=on_roi_cv,
+                         parent=controls_panel_tag)
 
         def on_roi_mp(sender, app_data, user_data):
             nonlocal use_face_roi_mp
             use_face_roi_mp = bool(app_data)
-        dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi_mp)
+        dpg.add_checkbox(label="Use Face ROI (MediaPipe)", default_value=False, callback=on_roi_mp,
+                         parent=controls_panel_tag)
 
         # Preview and spectrum toggles
         preview_enabled = True
@@ -466,11 +490,13 @@ def main() -> None:
             nonlocal spectrum_enabled
             spectrum_enabled = bool(app_data)
 
-        dpg.add_checkbox(label="Preview", default_value=True, callback=on_preview)
-        dpg.add_checkbox(label="Spectrum", default_value=False, callback=on_spectrum)
+        dpg.add_checkbox(label="Preview", default_value=True, callback=on_preview,
+                         parent=controls_panel_tag)
+        dpg.add_checkbox(label="Spectrum", default_value=False, callback=on_spectrum,
+                         parent=controls_panel_tag)
 
         # ROI status indicator
-        roi_status_text = dpg.add_text("ROI: Full | Face: --")
+        roi_status_text = dpg.add_text("ROI: Full | Face: --", parent=controls_panel_tag)
 
         # Camera selection
         # Avoid probing devices to prevent triggering Continuity Camera side-effects.
@@ -484,17 +510,18 @@ def main() -> None:
                 pass
 
         dpg.add_combo(camera_options, default_value=str(selected_device), label="Camera",
-                      callback=on_camera)
+                      callback=on_camera, parent=controls_panel_tag)
 
         # Connect/Disconnect
         def on_connect(sender, app_data, user_data):
             nonlocal connected
             connected = bool(app_data)
 
-        dpg.add_checkbox(label="Connect", default_value=False, callback=on_connect)
+        dpg.add_checkbox(label="Connect", default_value=False, callback=on_connect,
+                         parent=controls_panel_tag)
         # Recording controls
         record_base_dir = Path("runs")
-        dir_label = dpg.add_text(f"Output Dir: {record_base_dir}")
+        dir_label = dpg.add_text(f"Output Dir: {record_base_dir}", parent=controls_panel_tag)
 
         def on_choose_dir(sender, app_data):
             nonlocal record_base_dir
@@ -514,7 +541,9 @@ def main() -> None:
         ):
             dpg.add_file_extension("")
 
-        dpg.add_button(label="Choose Output Dir", callback=lambda: dpg.show_item("dir_dialog"))
+        dpg.add_button(label="Choose Output Dir",
+                       callback=lambda: dpg.show_item("dir_dialog"),
+                       parent=controls_panel_tag)
 
         def on_record(sender, app_data, user_data):
             nonlocal recording, rec
@@ -547,7 +576,8 @@ def main() -> None:
 
         from pathlib import Path
 
-        dpg.add_checkbox(label="Record (CSV)", default_value=False, callback=on_record)
+        dpg.add_checkbox(label="Record (CSV)", default_value=False, callback=on_record,
+                         parent=controls_panel_tag)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -678,10 +708,6 @@ def main() -> None:
             with wave_lock:
                 if wave_t_ds and wave_y_ds:
                     dpg.set_value(wave_series_tag, [wave_t_ds, wave_y_ds])
-                    try:
-                        dpg.fit_axis_data("wave_y_axis")
-                    except Exception:
-                        pass
         except Exception:
             pass
         # Update BPM timeline (throttle to ~2 Hz)
@@ -702,10 +728,6 @@ def main() -> None:
                         ]
                         if len(xs) >= 2:
                             dpg.set_value(bpm_series_tag, [xs, ys])
-                            try:
-                                dpg.fit_axis_data("bpm_y_axis")
-                            except Exception:
-                                pass
             except Exception:
                 pass
 
