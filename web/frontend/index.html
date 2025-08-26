@@ -49,6 +49,13 @@
           <input id="win" type="number" min="1" max="15" step="1" value="8" />
         </div>
         <button id="apply">Apply</button>
+        <hr />
+        <div>
+          <button id="startCap">Start Capture (getUserMedia)</button>
+          <button id="stopCap">Stop Capture</button>
+        </div>
+        <video id="vid" autoplay playsinline style="width:100%;max-width:240px"></video>
+        <canvas id="cam" width="160" height="120" style="display:none"></canvas>
       </div>
     </div>
     <script>
@@ -89,6 +96,46 @@
         chart.update();
       }
 
+      // getUserMedia capture and meanRGB ingestion
+      let mediaStream = null;
+      let ingestTimer = null;
+      const meanQueue = [];
+      let t0 = 0;
+      let dt = 0.1; // 10 Hz sampling
+
+      async function startCapture() {
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 }, audio: false });
+          el('vid').srcObject = mediaStream;
+          const ctxCam = el('cam').getContext('2d');
+          t0 = Date.now() / 1000;
+          if (ingestTimer) clearInterval(ingestTimer);
+          ingestTimer = setInterval(() => {
+            if (!mediaStream) return;
+            ctxCam.drawImage(el('vid'), 0, 0, el('cam').width, el('cam').height);
+            const frame = ctxCam.getImageData(0, 0, el('cam').width, el('cam').height).data;
+            let r=0,g=0,b=0, n=0;
+            // Sample every 4th pixel for speed
+            for (let i=0; i<frame.length; i+=16) { r+=frame[i]; g+=frame[i+1]; b+=frame[i+2]; n++; }
+            meanQueue.push([r/n, g/n, b/n]);
+            if (meanQueue.length >= 10) { // send ~1s batch
+              fetch('/ingest', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ t0, dt, mean_rgb: meanQueue.splice(0, meanQueue.length) })
+              }).catch(()=>{});
+              t0 += 10 * dt;
+            }
+          }, dt*1000);
+        } catch (e) {
+          console.error('getUserMedia failed', e);
+        }
+      }
+
+      function stopCapture() {
+        if (ingestTimer) { clearInterval(ingestTimer); ingestTimer = null; }
+        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      }
+
       async function bootstrap() {
         try {
           const res = await fetch('/metrics');
@@ -107,7 +154,8 @@
       s.src = 'https://cdn.jsdelivr.net/npm/chart.js';
       s.onload = bootstrap;
       document.head.appendChild(s);
+      el('startCap').onclick = startCapture;
+      el('stopCap').onclick = stopCapture;
     </script>
   </body>
   </html>
-

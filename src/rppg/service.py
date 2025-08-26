@@ -18,6 +18,8 @@ from typing import Deque, Optional
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .acf_bpm import estimate_bpm_acf
@@ -80,6 +82,15 @@ class IngestModel(BaseModel):
 
 def make_app() -> FastAPI:
     app = FastAPI(title="rPPG Service", version="0.2.0")
+
+    # CORS: localhostのみ許可（必要に応じて拡張）
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     state = State(
         params=Params(),
@@ -270,6 +281,9 @@ def make_app() -> FastAPI:
             ws_clients.discard(ws)
         except Exception:
             ws_clients.discard(ws)
+
+    # Serve static frontend at root
+    app.mount("/", StaticFiles(directory="web/frontend", html=True), name="frontend")
 
     return app
 
