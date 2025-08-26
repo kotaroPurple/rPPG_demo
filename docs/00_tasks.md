@@ -24,8 +24,8 @@
 - [x] `bpm.py`: FFTピーク検出、BPMレンジ制約
 - [x] スペクトル表示とSNR表示を追加
 - [x] プレビューに顔矩形オーバーレイ（認識可視化）
-- [ ] GUI: 推定BPMの時系列プロットを追加（移動窓で更新）
-- [ ] GUI: rPPG波形（BPM算出前）のプロットを整備
+- [x] GUI: 推定BPMの時系列プロットを追加（移動窓で更新）
+- [x] GUI: rPPG波形（BPM算出前）のプロットを整備
 - [ ] `quality.py`: SNR/ピーク信頼度算出
 - [ ] `recorder.py`: CSV/JSON 非同期保存
 - [ ] `app.py`（DearPyGUI）: プレビュー、波形/スペクトル、BPM/品質、設定

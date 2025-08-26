@@ -370,9 +370,10 @@ def main() -> None:
                 # rPPG waveform (pre-BPM signal)
                 wave_plot_tag = "wave_plot"
                 wave_series_tag = "wave_series"
+                wave_y_axis_tag = "wave_y_axis"
                 with dpg.plot(label="rPPG Waveform (sec)", height=150, width=-1, tag=wave_plot_tag):
                     dpg.add_plot_axis(dpg.mvXAxis, label="t (s)")
-                    y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="amp")
+                    y_axis_w = dpg.add_plot_axis(dpg.mvYAxis, label="amp", tag=wave_y_axis_tag)
                     dpg.add_line_series(
                         [0.0, 1.0], [0.0, 0.0], parent=y_axis_w, tag=wave_series_tag
                     )
@@ -390,9 +391,10 @@ def main() -> None:
                 # BPM timeline plot
                 bpm_plot_tag = "bpm_plot"
                 bpm_series_tag = "bpm_series"
+                bpm_y_axis_tag = "bpm_y_axis"
                 with dpg.plot(label="BPM Timeline", height=150, width=-1, tag=bpm_plot_tag):
                     dpg.add_plot_axis(dpg.mvXAxis, label="time")
-                    y_axis_bpm = dpg.add_plot_axis(dpg.mvYAxis, label="BPM")
+                    y_axis_bpm = dpg.add_plot_axis(dpg.mvYAxis, label="BPM", tag=bpm_y_axis_tag)
                     dpg.add_line_series(
                         [0.0, 1.0], [0.0, 0.0], parent=y_axis_bpm, tag=bpm_series_tag
                     )
@@ -671,6 +673,10 @@ def main() -> None:
             with wave_lock:
                 if wave_t_ds and wave_y_ds:
                     dpg.set_value(wave_series_tag, [wave_t_ds, wave_y_ds])
+                    try:
+                        dpg.fit_axis_data("wave_y_axis")
+                    except Exception:
+                        pass
         except Exception:
             pass
         # Update BPM timeline (throttle to ~2 Hz)
@@ -691,6 +697,10 @@ def main() -> None:
                         ]
                         if len(xs) >= 2:
                             dpg.set_value(bpm_series_tag, [xs, ys])
+                            try:
+                                dpg.fit_axis_data("bpm_y_axis")
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
