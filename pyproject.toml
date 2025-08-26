@@ -41,6 +41,14 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-q --cov=rppg --cov-report=term --cov-fail-under=80"
 
+[tool.coverage.run]
+omit = [
+  "src/rppg/app.py",
+  "src/rppg/capture.py",
+  "src/rppg/roi.py",
+  "src/rppg/service.py",
+]
+
 [tool.taskipy]
 
 [tool.taskipy.tasks]
