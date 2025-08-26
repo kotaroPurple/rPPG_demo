@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>rPPG Web Dashboard</title>
+    <link rel="icon" href="data:;base64,=">
     <style>
       body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 16px; }
       .row { display: flex; gap: 16px; }
@@ -24,6 +25,7 @@
           <span id="fs">fs: -- Hz</span>
         </div>
         <canvas id="chart"></canvas>
+        <canvas id="rrchart" style="margin-top:8px"></canvas>
       </div>
       <div class="card" style="flex:1">
         <div>
@@ -61,12 +63,19 @@
     <script>
       const el = (id) => document.getElementById(id);
       const metrics = { xs: [], ys: [] };
+      const rrmetrics = { xs: [], ys: [] };
       const maxPoints = 300;
       const ctx = el('chart').getContext('2d');
       const chart = new Chart(ctx, {
         type: 'line',
         data: { labels: [], datasets: [{ label: 'BPM', data: [], borderColor: '#2b6cb0' }] },
         options: { animation: false, responsive: true, scales: { y: { min: 40, max: 120 } } }
+      });
+      const rrctx = el('rrchart').getContext('2d');
+      const rrchart = new Chart(rrctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'RR (BrPM)', data: [], borderColor: '#2f855a' }] },
+        options: { animation: false, responsive: true, scales: { y: { min: 6, max: 30 } } }
       });
 
       async function applyControl() {
@@ -94,6 +103,16 @@
         chart.data.labels = xs;
         chart.data.datasets[0].data = metrics.ys;
         chart.update();
+
+        // RR timeline
+        rrmetrics.xs.push(t);
+        rrmetrics.ys.push(m.rr ?? null);
+        if (rrmetrics.xs.length > maxPoints) { rrmetrics.xs.shift(); rrmetrics.ys.shift(); }
+        const rrt0 = rrmetrics.xs[rrmetrics.xs.length - 1] - 90;
+        const rrxs = rrmetrics.xs.map(x => x - rrt0);
+        rrchart.data.labels = rrxs;
+        rrchart.data.datasets[0].data = rrmetrics.ys;
+        rrchart.update();
       }
 
       // getUserMedia capture and meanRGB ingestion
