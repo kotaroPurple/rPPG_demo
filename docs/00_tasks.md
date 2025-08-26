@@ -37,9 +37,13 @@
 - [ ] RRトラッカー設定（低周波レンジに合わせた `tracker.py` の再利用）
 - [ ] UIに RR 表示とタイムライン（切替 or 追加タブ）
 
-### Web連携（将来・現時点では非実施）
-- [ ] `service.py`: FastAPI + WebSocket でメトリクス配信
-- [ ] Webフロント雛形 `web/frontend/`（静的UI or SPA）
+### Web連携（Webアプリ）
+- [ ] `service.py`: FastAPI + WebSocket でメトリクス配信（/metrics,/ws）
+- [ ] /control エンドポイントでパラメータ更新（検証/型付け）
+- [ ] /ingest エンドポイントでブラウザ平均RGBを受信反映
+- [ ] Webフロント雛形 `web/frontend/`（プレビュー/メトリクス/タイムライン/操作）
+- [ ] getUserMedia + Canvasで平均RGB算出（任意）
+- [ ] CORS/ローカルバインド/レート制御
 
 ### テスト/検証
 - [x] `pytest` 導入と基本テスト（前処理/合成/BPM）

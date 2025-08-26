@@ -50,7 +50,7 @@ sequenceDiagram
 - UIイベント: `Queue` でメトリクスをバースト抑制（200msデバウンス）して描画スレッドに送出
 - ストップシグナル: `threading.Event`（`stop_event.is_set()` を各ループで監視）
 
-### Web 経路の追加（将来・現時点では非実施）
+### Web 経路の追加（計画/対応方針）
 ```mermaid
 sequenceDiagram
   participant Br as Browser (Web UI)
@@ -65,8 +65,8 @@ sequenceDiagram
     Svc->>Proc: enqueue samples/frames
   end
 ```
-- 近接/ローカル運用ではコアがカメラを直接使用し、Browser はメトリクス受信主体。（現時点ではWeb連携は非実施）
-- ブラウザでの映像取得が必要な場合は `getUserMedia` → `RTC/WS` を想定。（将来検討）
+- 近接/ローカル運用ではコアがカメラを直接使用し、Browser はメトリクス受信主体。
+- ブラウザでの映像取得が必要な場合は `getUserMedia` で平均RGBを算出し `/ingest` へ送信（軽量）。
 
 ## モジュール構成（`src/` 提案）
 ```
@@ -163,8 +163,8 @@ class Recorder:
 - RoiResult: `mask(s)`, `valid: bool`, `landmarks`
 - Sample: `mean_rgb: (R,G,B)`, `timestamp`
 - WindowResult: `signal: np.ndarray`, `bpm: float`, `snr: float`, `peak_f: float`
-### Web API（将来・現時点では非実施）
-- JSONメッセージ、REST/WS エンドポイント案は将来検討とし、現段階の実装範囲外。
+### Web API（概要）
+- `GET /metrics`, `WS /ws`, `POST /control`, `POST /ingest`（詳細は `docs/05_web_app_spec.md`）
 
 ## 信号処理設計
 - 正規化: $x_n(t) = x(t)/\overline{x}(t) - 1$（窓内移動平均）
