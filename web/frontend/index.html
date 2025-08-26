@@ -3,43 +3,111 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>rPPG Metrics</title>
+    <title>rPPG Web Dashboard</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; }
-      .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; max-width: 480px; }
-      .row { display: flex; gap: 1rem; }
-      .label { color: #555; width: 6rem; }
-      .val { font-weight: 600; }
-      button { padding: 0.5rem 1rem; }
+      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 16px; }
+      .row { display: flex; gap: 16px; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; }
+      .metrics span { margin-right: 16px; }
+      #chart { width: 100%; height: 240px; }
     </style>
   </head>
   <body>
-    <h1>rPPG Metrics (Local)</h1>
-    <div class="card">
-      <div class="row"><div class="label">BPM</div><div id="bpm" class="val">--</div></div>
-      <div class="row"><div class="label">SNR</div><div id="snr" class="val">-- dB</div></div>
-      <div class="row"><div class="label">fs</div><div id="fs" class="val">-- Hz</div></div>
-      <div class="row"><div class="label">t</div><div id="t" class="val">--</div></div>
-      <p>
-        <button id="refresh">Refresh</button>
-      </p>
+    <h2>rPPG Web Dashboard</h2>
+    <div class="row">
+      <div class="card" style="flex:2">
+        <div class="metrics">
+          <span id="bpm">BPM: --</span>
+          <span id="rr">RR: --</span>
+          <span id="snr">SNR: -- dB</span>
+          <span id="conf">Conf: --</span>
+          <span id="fs">fs: -- Hz</span>
+        </div>
+        <canvas id="chart"></canvas>
+      </div>
+      <div class="card" style="flex:1">
+        <div>
+          <label>Estimator</label>
+          <select id="est">
+            <option>FFT</option>
+            <option>ACF</option>
+            <option>Hilbert-IF</option>
+            <option>Tracker(FFT)</option>
+            <option>Tracker(ACF)</option>
+            <option>Tracker(IF)</option>
+          </select>
+        </div>
+        <div>
+          <label>Algo</label>
+          <select id="algo">
+            <option>POS</option>
+            <option>CHROM</option>
+          </select>
+        </div>
+        <div>
+          <label>Window (s)</label>
+          <input id="win" type="number" min="1" max="15" step="1" value="8" />
+        </div>
+        <button id="apply">Apply</button>
+      </div>
     </div>
     <script>
-      async function refresh() {
+      const el = (id) => document.getElementById(id);
+      const metrics = { xs: [], ys: [] };
+      const maxPoints = 300;
+      const ctx = el('chart').getContext('2d');
+      const chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'BPM', data: [], borderColor: '#2b6cb0' }] },
+        options: { animation: false, responsive: true, scales: { y: { min: 40, max: 120 } } }
+      });
+
+      async function applyControl() {
+        const body = {
+          est: el('est').value,
+          algo: el('algo').value,
+          win_sec: parseFloat(el('win').value)
+        };
+        await fetch('/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      }
+      el('apply').onclick = applyControl;
+
+      function updateMetrics(m) {
+        el('bpm').textContent = `BPM: ${m.bpm?.toFixed?.(1) ?? '--'}`;
+        el('rr').textContent = `RR: ${m.rr?.toFixed?.(1) ?? '--'}`;
+        el('snr').textContent = `SNR: ${m.snr?.toFixed?.(1) ?? '--'} dB`;
+        el('conf').textContent = `Conf: ${m.conf?.toFixed?.(2) ?? '--'}`;
+        el('fs').textContent = `fs: ${m.fs?.toFixed?.(1) ?? '--'} Hz`;
+        const t = m.t ?? Date.now()/1000;
+        metrics.xs.push(t);
+        metrics.ys.push(m.bpm ?? null);
+        if (metrics.xs.length > maxPoints) { metrics.xs.shift(); metrics.ys.shift(); }
+        const t0 = metrics.xs[metrics.xs.length - 1] - 90;
+        const xs = metrics.xs.map(x => x - t0);
+        chart.data.labels = xs;
+        chart.data.datasets[0].data = metrics.ys;
+        chart.update();
+      }
+
+      async function bootstrap() {
         try {
           const res = await fetch('/metrics');
-          const data = await res.json();
-          document.getElementById('bpm').textContent = (data.bpm ?? '--').toFixed ? data.bpm.toFixed(1) : data.bpm;
-          document.getElementById('snr').textContent = (data.snr ?? '--').toFixed ? data.snr.toFixed(1) + ' dB' : data.snr;
-          document.getElementById('fs').textContent = (data.fs ?? '--').toFixed ? data.fs.toFixed(1) + ' Hz' : data.fs;
-          document.getElementById('t').textContent = data.t ?? '--';
-        } catch (e) {
-          console.error(e);
+          updateMetrics(await res.json());
+        } catch {}
+        try {
+          const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+          ws.onmessage = (e) => { try { updateMetrics(JSON.parse(e.data)); } catch {} };
+          ws.onclose = () => setTimeout(bootstrap, 2000);
+        } catch {
+          setTimeout(bootstrap, 2000);
         }
       }
-      document.getElementById('refresh').addEventListener('click', refresh);
-      refresh();
-      setInterval(refresh, 2000);
+      // load Chart.js dynamically (CDN)
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+      s.onload = bootstrap;
+      document.head.appendChild(s);
     </script>
   </body>
   </html>
+
