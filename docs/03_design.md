@@ -279,3 +279,29 @@ UI/実装方針
 1) `acf_bpm.py` を追加し短窓時の頑健化
 2) `hilbert_if.py` でサンプル単位の推定（平滑強め）
 3) `tracker.py` で `FFT/ACF/IF` を観測に用いる周波数トラッカー
+
+## 呼吸数（Respiration Rate; RR）推定（設計追加）
+TBME 2016（Wang et al.）の枠組みを活かし、rPPG信号の低周波成分（基線揺らぎ）や包絡、あるいはHRの微小変動（RSA）から呼吸数（breaths per minute; BrPM）を推定する。
+
+- 信号源（候補）
+  - 低周波基線: 平滑（ローパス）した平均RGBまたはrPPG信号の基線（0.1–0.5 Hz）。
+  - 包絡: 帯域通過済みrPPGのヒルベルト包絡（|analytic|）→ 0.1–0.5 Hz 成分抽出。
+  - HR変動: 短窓HR系列の微小変動（RSA）から呼吸主成分を抽出（要Tracker併用）。
+
+- 推定器
+  - FFT/ACFベース: RR帯（0.1–0.5 Hz; 6–30 BrPM）でピーク探索（短窓・高オーバーラップ）。
+  - Hilbert-IF（包絡）: 包絡の瞬時周波数を用いてBrPMを逐次更新。
+  - RRトラッカー: `FreqTracker` を低周波向けに再利用（f_min=0.08, f_max=0.7など）。品質は包絡SNR/ピーク信頼度から。
+
+- UI
+  - メトリクスに `RR`（BrPM）を追加（BPM/SNR/Confの横）。
+  - タイムラインに `RR` の系列を追加（切替式 or 別タブ）。
+  - パラメータ: RR帯域（既定 0.1–0.5 Hz）、包絡平滑、RRトラッカーQ/R。
+
+- モジュール構成（追加）
+  - `respiration.py`: RR信号抽出（基線/包絡）と FFT/ACF/Hilbert-IF ベースのRR推定。
+  - `tracker.py`: 既存トラッカーをRR向け設定で再利用。
+
+- 検証観点
+  - 室内静止条件で BrPM が 6–20 の範囲で安定。
+  - rPPGの品質が低下した際は RR の更新を緩める（品質→Rの動的調整）。

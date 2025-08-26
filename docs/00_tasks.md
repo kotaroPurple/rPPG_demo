@@ -33,6 +33,9 @@
 - [x] ヒルベルト瞬時周波数推定 `hilbert_if.py`
 - [x] 周波数トラッカー（カルマン/α-β） `tracker.py`（観測=FFT/ACF/IF 選択式）
 - [x] UIに Estimator 選択（FFT/ACF/Hilbert-IF/KF-Tracker）を追加
+- [ ] 呼吸数推定 `respiration.py`（基線/包絡抽出 + FFT/ACF/Hilbert-IF）
+- [ ] RRトラッカー設定（低周波レンジに合わせた `tracker.py` の再利用）
+- [ ] UIに RR 表示とタイムライン（切替 or 追加タブ）
 
 ### Web連携（将来・現時点では非実施）
 - [ ] `service.py`: FastAPI + WebSocket でメトリクス配信
@@ -42,7 +45,8 @@
 - [x] `pytest` 導入と基本テスト（前処理/合成/BPM）
 - [x] カメラ依存をモック化したユニットテスト
 - [ ] 最低カバレッジ閾値（例: 80%）の設定
- - [ ] 新推定器（ACF/IF/KF）に対する合成信号テスト（決定論的）
+- [ ] 新推定器（ACF/IF/KF）に対する合成信号テスト（決定論的）
+- [ ] RR推定の合成信号テスト（0.2–0.3 Hzの正弦＋ノイズ）
 
 ### 運用/品質
 - [x] 実行スクリプト追加例: `uv run python -m rppg.app`
