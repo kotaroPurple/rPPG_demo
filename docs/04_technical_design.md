@@ -100,6 +100,27 @@ flowchart TD
   CONF --> KF
 ```
 
+### 4.5 推定器の分岐図
+
+```mermaid
+flowchart TD
+  start([rPPG signal s(t)]) --> mode{Estimator Mode}
+  mode -->|FFT| fft[FFT Peak\n`bpm.py`]
+  mode -->|ACF| acf[Autocorrelation\n`acf_bpm.py`]
+  mode -->|Hilbert-IF| if[Instantaneous Freq\n`hilbert_if.py`]
+  mode -->|Tracker(FFT)| trk_fft[Tracker + FFT meas\n`tracker.py`]
+  mode -->|Tracker(ACF)| trk_acf[Tracker + ACF meas\n`tracker.py`]
+  mode -->|Tracker(IF)| trk_if[Tracker + IF meas\n`tracker.py`]
+  fft --> bpm1[BPM]
+  acf --> bpm2[BPM]
+  if --> bpm3[BPM]
+  trk_fft --> bpm4[BPM]
+  trk_acf --> bpm5[BPM]
+  trk_if --> bpm6[BPM]
+  classDef est fill:#eef,stroke:#88f;
+  class fft,acf,if,trk_fft,trk_acf,trk_if est;
+```
+
 ---
 
 ## 5. 品質指標（`quality.py`）
@@ -151,6 +172,35 @@ flowchart LR
   PROC -->|bpm, snr, conf, rr| VIEW
   PROC -->|waveform, envelope| VIEW
   VIEW -->|controls| PROC
+```
+
+### 7.1 UI構成（レイアウト）
+
+```mermaid
+flowchart LR
+  subgraph Main Window
+    subgraph Left[Left Pane]
+      PV[Camera Preview\n(ROI overlay)]
+      METRICS[BPM | SNR | Conf | RR]
+      subgraph Plots[Plots]
+        WAVE[rPPG Waveform\n(Y:±0.005, X:−win..0)]
+        BPMTL[BPM Timeline\n(Y:40–120, X:0..90s)]
+      end
+      RRW[Respiration Waveform\n(envelope, X:−win..0)]
+    end
+    subgraph Right[Controls]
+      ALG[Algorithm: POS/CHROM]
+      WIN[Window (1–15s; default 8s)]
+      BAND[Band (Hz): fmin/fmax]
+      EST[Estimator: FFT/ACF/H-IF/Tracker]
+      ESTP[IF smooth, Tracker Q/R]
+      QUAL[Quality Source + scale]
+      TL[Tl Source: Estimator/Tracker]
+      REC[Record CSV]
+      ROI[ROI options: Haar/MediaPipe]
+      CAM[Camera/Resolution/Connect]
+    end
+  end
 ```
 
 ---
