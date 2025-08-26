@@ -43,20 +43,24 @@ def main() -> None:
     except Exception:
         pass
 
+    from .acf_bpm import estimate_bpm_acf
     from .bpm import estimate_bpm
     from .capture import Capture, CaptureConfig
     from .chrom import chrom_signal
+    from .hilbert_if import estimate_bpm_if
     from .pos import pos_signal
     from .preprocess import bandpass, moving_average_normalize
     from .quality import peak_confidence, snr_db
     from .recorder import Recorder, RecorderConfig
     from .roi import FaceBoxROI, mean_rgb
+    from .tracker import FreqTracker, TrackConfig
 
     # Config
     width, height, fps_target = 1280, 720, 30
     win_sec = 3.0
     fmin, fmax = 0.7, 2.0  # default upper bound 120 BPM for stability
     algo = "POS"  # or CHROM
+    estimator = "FFT"  # FFT | ACF | Hilbert-IF | Tracker(FFT|ACF|IF)
     # Default camera index
     import sys as _sys
     selected_device = 0
@@ -96,6 +100,9 @@ def main() -> None:
     recording = False
     rec: Optional[Recorder] = None
     rec_started_wall: Optional[float] = None
+    # Tracker (optional)
+    tracker = FreqTracker(TrackConfig())
+    last_t_for_tracker: Optional[float] = None
 
     # ROI status (for UI)
     roi_mode_used = "Full"
@@ -229,6 +236,7 @@ def main() -> None:
     def processing_loop() -> None:
         nonlocal bpm_value, snr_value, conf_value
         nonlocal spec_freqs_ds, spec_mag_ds, wave_t_ds, wave_y_ds
+        nonlocal last_t_for_tracker
         while running:
             if not connected:
                 time.sleep(0.1)
@@ -268,8 +276,46 @@ def main() -> None:
             idx = int(np.argmax(mag * band))
             snr_value = snr_db(mag, idx)  # used in UI update
             conf_value = peak_confidence(mag, idx)
-            bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
-            bpm_value = bpm
+            # BPM estimation by selected estimator
+            if estimator == "FFT":
+                bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
+                bpm_value = bpm
+                last_t_for_tracker = float(time.time())
+            elif estimator == "ACF":
+                ar = estimate_bpm_acf(s, fs=fs, bpm_min=60.0 * fmin, bpm_max=60.0 * fmax_eff)
+                if ar.bpm is not None:
+                    bpm_value = float(ar.bpm)
+                last_t_for_tracker = float(time.time())
+            elif estimator == "Hilbert-IF":
+                ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(0.1 * fs)))
+                if ir.bpm is not None:
+                    bpm_value = float(ir.bpm)
+                last_t_for_tracker = float(time.time())
+            else:
+                # Tracker modes use sub-estimator as measurement
+                now = float(time.time())
+                if last_t_for_tracker is None:
+                    last_t_for_tracker = now
+                dt = max(1e-3, now - last_t_for_tracker)
+                last_t_for_tracker = now
+                tracker.predict(dt)
+                meas_bpm: Optional[float] = None
+                if estimator == "Tracker(FFT)":
+                    m, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
+                    meas_bpm = m
+                elif estimator == "Tracker(ACF)":
+                    ar = estimate_bpm_acf(s, fs=fs, bpm_min=60.0 * fmin, bpm_max=60.0 * fmax_eff)
+                    meas_bpm = ar.bpm
+                elif estimator == "Tracker(IF)":
+                    ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(0.1 * fs)))
+                    meas_bpm = ir.bpm
+                # Map SNR to quality [0..1]
+                qual = float(np.clip((snr_value / 15.0), 0.05, 1.0))
+                if meas_bpm is not None:
+                    tracker.update(float(meas_bpm) / 60.0, quality=qual)
+                tb = tracker.value_bpm()
+                if tb is not None:
+                    bpm_value = tb
             # Update BPM timeline (1 point per processing tick ~10Hz throttled later in UI)
             with bpm_hist_lock:
                 bpm_hist_t.append(time.time())
@@ -460,6 +506,17 @@ def main() -> None:
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
                              min_value=1.5, max_value=5.0, callback=on_band_max,
                              parent=controls_panel_tag)
+        # Estimator selection
+        def on_estimator(sender, app_data, user_data):
+            nonlocal estimator
+            estimator = str(app_data)
+        dpg.add_combo(
+            ("FFT", "ACF", "Hilbert-IF", "Tracker(FFT)", "Tracker(ACF)", "Tracker(IF)"),
+            default_value=estimator,
+            label="Estimator",
+            callback=on_estimator,
+            parent=controls_panel_tag,
+        )
         # Resolution selection
         def on_res(sender, app_data, user_data):
             nonlocal selected_res_name
