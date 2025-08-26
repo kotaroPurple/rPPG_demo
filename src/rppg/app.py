@@ -52,6 +52,7 @@ def main() -> None:
     from .preprocess import bandpass, moving_average_normalize
     from .quality import peak_confidence, snr_db
     from .recorder import Recorder, RecorderConfig
+    from .respiration import estimate_rr_envelope
     from .roi import FaceBoxROI, mean_rgb
     from .tracker import FreqTracker, TrackConfig
 
@@ -91,6 +92,7 @@ def main() -> None:
     B_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     T_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     bpm_value = 0.0
+    rr_value = 0.0
     snr_value = 0.0
     conf_value = 0.0
     # Waveform buffer (latest processed window) and BPM timeline
@@ -112,6 +114,10 @@ def main() -> None:
     # Tracker (optional)
     tracker = FreqTracker(TrackConfig())
     last_t_for_tracker: Optional[float] = None
+    # Respiration waveform for debug
+    rr_wave_lock = threading.Lock()
+    rr_wave_t_ds: Optional[list[float]] = None
+    rr_wave_y_ds: Optional[list[float]] = None
 
     # ROI status (for UI)
     roi_mode_used = "Full"
@@ -243,8 +249,9 @@ def main() -> None:
 
     # Processing thread
     def processing_loop() -> None:
-        nonlocal bpm_value, snr_value, conf_value
+        nonlocal bpm_value, snr_value, conf_value, rr_value
         nonlocal spec_freqs_ds, spec_mag_ds, wave_t_ds, wave_y_ds
+        nonlocal rr_wave_t_ds, rr_wave_y_ds
         nonlocal last_t_for_tracker
         while running:
             if not connected:
@@ -352,6 +359,25 @@ def main() -> None:
                 if trk_bpm_current is not None:
                     trk_bpm_hist_t.append(nowt)
                     trk_bpm_hist_y.append(trk_bpm_current)
+            # Respiration estimation (envelope-based) and waveform downsample for UI
+            rr = estimate_rr_envelope(s, fs=fs, rr_min_hz=0.1, rr_max_hz=0.5)
+            if rr.brpm is not None:
+                rr_value = float(rr.brpm)
+            if rr.env.size > 0:
+                t_rel_rr = (
+                    np.arange(rr.env.size, dtype=np.float32) - (rr.env.size - 1)
+                ) / float(fs)
+                max_points = 256
+                if rr.env.size > max_points:
+                    idx_ds = np.linspace(0, rr.env.size - 1, max_points).astype(int)
+                    t_rr = t_rel_rr[idx_ds].tolist()
+                    y_rr = rr.env[idx_ds].tolist()
+                else:
+                    t_rr = t_rel_rr.tolist()
+                    y_rr = rr.env.tolist()
+                with rr_wave_lock:
+                    rr_wave_t_ds = t_rr
+                    rr_wave_y_ds = y_rr
             # Prepare waveform downsample for UI (time in seconds, centered at 0)
             if s.size > 0:
                 t_rel = (np.arange(s.size, dtype=np.float32) - (s.size - 1)) / float(fs)
@@ -453,6 +479,8 @@ def main() -> None:
                     dpg.add_spacer(width=12)
                     conf_text = dpg.add_text("Conf: --")
                     dpg.add_spacer(width=12)
+                    rr_text = dpg.add_text("RR: -- BrPM")
+                    dpg.add_spacer(width=12)
                     status_text = dpg.add_text("Status: idle")
                 # Plots area without scrolling: place two plots side-by-side
                 with dpg.group(horizontal=True):
@@ -490,17 +518,21 @@ def main() -> None:
                             dpg.set_axis_limits(bpm_x_axis_tag, 0.0, 90.0)
                         except Exception:
                             pass
-                # Spectrum plot (magnitude vs Hz) — optional
-                plot_tag = "spectrum_plot"
-                series_line_tag = "spectrum_line"
-                series_bar_tag = "spectrum_bar"
-                with dpg.plot(label="Spectrum", height=180, width=-1, tag=plot_tag):
-                    dpg.add_plot_axis(dpg.mvXAxis, label="Hz")
-                    y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Mag")
-                    dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_line_tag)
-                    dpg.add_bar_series([0.0, 1.0], [0.0, 0.0], parent=y_axis, tag=series_bar_tag)
-                    dpg.configure_item(series_line_tag, show=False)
-                    dpg.configure_item(series_bar_tag, show=False)
+                # Respiration debug waveform (envelope)
+                rr_plot_tag = "rr_plot"
+                rr_series_tag = "rr_series"
+                rr_x_axis_tag = "rr_x_axis"
+                rr_y_axis_tag = "rr_y_axis"
+                with dpg.plot(
+                    label="Respiration Waveform (sec)", height=160, width=-1, tag=rr_plot_tag
+                ):
+                    dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag=rr_x_axis_tag)
+                    y_axis_rr = dpg.add_plot_axis(dpg.mvYAxis, label="env", tag=rr_y_axis_tag)
+                    dpg.add_line_series([0.0, 1.0], [0.0, 0.0], parent=y_axis_rr, tag=rr_series_tag)
+                    try:
+                        dpg.set_axis_limits(rr_x_axis_tag, -win_sec, 0.0)
+                    except Exception:
+                        pass
             # Right panel: Controls
             controls_panel_tag = "controls_panel"
             with dpg.child_window(width=340, height=860, tag=controls_panel_tag):
@@ -829,6 +861,7 @@ def main() -> None:
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
         dpg.set_value(snr_text, f"SNR: {snr_value:.1f} dB")
         dpg.set_value(conf_text, f"Conf: {conf_value:.2f}")
+        dpg.set_value(rr_text, f"RR: {rr_value:.1f} BrPM")
         # Update ROI status line
         status_roi = f"ROI: {roi_mode_used} | Face: {'Y' if roi_face_found else 'N'}"
         try:
@@ -844,72 +877,19 @@ def main() -> None:
             fs_est = 0.0
         conn = "on" if connected else "off"
         dpg.set_value(status_text, f"Status: conn={conn} dev={selected_device} fs~{fs_est:.1f}Hz")
-        # Update spectrum series if available (throttled and downsampled)
-        # Recompute spectrum from latest buffer for display purpose
-        if spectrum_enabled and len(T_buf) >= 8:
-            # Throttle updates to reduce GL load
-            if not hasattr(ui_update_callback, "_spec_counter"):
-                ui_update_callback._spec_counter = 0  # type: ignore[attr-defined]
-            ui_update_callback._spec_counter += 1  # type: ignore[attr-defined]
-            spectrum_interval_frames = 60  # ~1 Hz if frame callback ~60 FPS
-            if ui_update_callback._spec_counter % spectrum_interval_frames == 0:  # type: ignore[attr-defined]
-                t = np.array(T_buf, dtype=np.float64)
-                fs = 1.0 / np.median(np.diff(t[-min(len(t), 50) :]))
-                L = max(8, int(win_sec * fs))
-                if len(R_buf) >= L:
-                    R = np.array(list(R_buf)[-L:], dtype=np.float32)
-                    G = np.array(list(G_buf)[-L:], dtype=np.float32)
-                    B = np.array(list(B_buf)[-L:], dtype=np.float32)
-                    Rn = bandpass(
-                        moving_average_normalize(R, max(1, int(0.5 * fs))), fs, fmin, fmax
-                    )
-                    Gn = bandpass(
-                        moving_average_normalize(G, max(1, int(0.5 * fs))), fs, fmin, fmax
-                    )
-                    Bn = bandpass(
-                        moving_average_normalize(B, max(1, int(0.5 * fs))), fs, fmin, fmax
-                    )
-                    s = pos_signal(Rn, Gn, Bn) if algo == "POS" else chrom_signal(Rn, Gn, Bn)
-                    x = (s - s.mean()) * np.hanning(s.size).astype(np.float32)
-                    X = np.fft.rfft(x)
-                    freqs = np.fft.rfftfreq(s.size, d=1.0 / fs)
-                    mag = np.abs(X)
-                    # Sanitize and downsample to max_points
-                    max_points = 256
-                    if mag.size > 0 and freqs.size == mag.size:
-                        # Remove non-finite
-                        mag = np.nan_to_num(mag, nan=0.0, posinf=0.0, neginf=0.0)
-                        if freqs.size > max_points:
-                            idx = np.linspace(0, freqs.size - 1, max_points).astype(int)
-                            freqs_ds = freqs[idx]
-                            mag_ds = mag[idx]
-                        else:
-                            freqs_ds = freqs
-                            mag_ds = mag
-                        try:
-                            # Bars only（安定性優先）
-                            dpg.configure_item(series_line_tag, show=False)
-                            dpg.configure_item(series_bar_tag, show=True)
-                            # 64本にさらに間引き
-                            if freqs_ds.size > 64:
-                                idx2 = np.linspace(0, freqs_ds.size - 1, 64).astype(int)
-                                fx = freqs_ds[idx2]
-                                my = mag_ds[idx2]
-                            else:
-                                fx = freqs_ds
-                            my = mag_ds
-                            dpg.set_value(series_bar_tag, [fx.tolist(), my.tolist()])
-                        except Exception:
-                            try:
-                                dpg.configure_item(series_bar_tag, show=False)
-                                dpg.configure_item(series_line_tag, show=False)
-                            except Exception:
-                                pass
+        # Spectrum UI disabled (requested): skip spectrum updates
         # Update rPPG waveform plot (lightweight)
         try:
             with wave_lock:
                 if wave_t_ds and wave_y_ds:
                     dpg.set_value(wave_series_tag, [wave_t_ds, wave_y_ds])
+        except Exception:
+            pass
+        # Update respiration waveform plot
+        try:
+            with rr_wave_lock:
+                if rr_wave_t_ds and rr_wave_y_ds:
+                    dpg.set_value(rr_series_tag, [rr_wave_t_ds, rr_wave_y_ds])
         except Exception:
             pass
         # Update BPM timeline (throttle to ~2 Hz)
