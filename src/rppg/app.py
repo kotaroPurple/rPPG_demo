@@ -61,8 +61,13 @@ def main() -> None:
     fmin, fmax = 0.7, 2.0  # default upper bound 120 BPM for stability
     algo = "POS"  # or CHROM
     estimator = "FFT"  # FFT | ACF | Hilbert-IF | Tracker(FFT|ACF|IF)
+    timeline_source = "Estimator"  # Estimator | Tracker
     # Estimator parameters
     if_smooth_sec = 0.10  # seconds for IF moving-average
+    # Quality mapping parameters
+    quality_mode = "SNR"  # SNR | Conf | SNRxConf
+    quality_floor = 0.05
+    quality_snr_scale = 15.0
     # Default camera index
     import sys as _sys
     selected_device = 0
@@ -93,8 +98,10 @@ def main() -> None:
     wave_t_ds: Optional[list[float]] = None
     wave_y_ds: Optional[list[float]] = None
     bpm_hist_lock = threading.Lock()
-    bpm_hist_t: Deque[float] = deque(maxlen=240)  # ~4 min at 1 Hz
-    bpm_hist_y: Deque[float] = deque(maxlen=240)
+    est_bpm_hist_t: Deque[float] = deque(maxlen=240)
+    est_bpm_hist_y: Deque[float] = deque(maxlen=240)
+    trk_bpm_hist_t: Deque[float] = deque(maxlen=240)
+    trk_bpm_hist_y: Deque[float] = deque(maxlen=240)
     # Shared spectrum data (processing thread produces, UI consumes)
     spec_lock = threading.Lock()
     spec_freqs_ds: Optional[list[float]] = None
@@ -278,20 +285,25 @@ def main() -> None:
             idx = int(np.argmax(mag * band))
             snr_value = snr_db(mag, idx)  # used in UI update
             conf_value = peak_confidence(mag, idx)
+            est_bpm_current: Optional[float] = None
+            trk_bpm_current: Optional[float] = None
             # BPM estimation by selected estimator
             if estimator == "FFT":
                 bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
                 bpm_value = bpm
+                est_bpm_current = float(bpm)
                 last_t_for_tracker = float(time.time())
             elif estimator == "ACF":
                 ar = estimate_bpm_acf(s, fs=fs, bpm_min=60.0 * fmin, bpm_max=60.0 * fmax_eff)
                 if ar.bpm is not None:
                     bpm_value = float(ar.bpm)
+                    est_bpm_current = float(ar.bpm)
                 last_t_for_tracker = float(time.time())
             elif estimator == "Hilbert-IF":
                 ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(if_smooth_sec * fs)))
                 if ir.bpm is not None:
                     bpm_value = float(ir.bpm)
+                    est_bpm_current = float(ir.bpm)
                 last_t_for_tracker = float(time.time())
             else:
                 # Tracker modes use sub-estimator as measurement
@@ -305,23 +317,41 @@ def main() -> None:
                 if estimator == "Tracker(FFT)":
                     m, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
                     meas_bpm = m
+                    est_bpm_current = float(m)
                 elif estimator == "Tracker(ACF)":
                     ar = estimate_bpm_acf(s, fs=fs, bpm_min=60.0 * fmin, bpm_max=60.0 * fmax_eff)
                     meas_bpm = ar.bpm
+                    if ar.bpm is not None:
+                        est_bpm_current = float(ar.bpm)
                 elif estimator == "Tracker(IF)":
                     ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(if_smooth_sec * fs)))
                     meas_bpm = ir.bpm
-                # Map SNR to quality [0..1]
-                qual = float(np.clip((snr_value / 15.0), 0.05, 1.0))
+                    if ir.bpm is not None:
+                        est_bpm_current = float(ir.bpm)
+                # Map SNR/Conf to quality [0..1]
+                if quality_mode == "SNR":
+                    qual = float(np.clip(snr_value / quality_snr_scale, quality_floor, 1.0))
+                elif quality_mode == "Conf":
+                    qual = float(np.clip(conf_value, quality_floor, 1.0))
+                else:
+                    qual = float(
+                        np.clip((snr_value / quality_snr_scale) * conf_value, quality_floor, 1.0)
+                    )
                 if meas_bpm is not None:
                     tracker.update(float(meas_bpm) / 60.0, quality=qual)
                 tb = tracker.value_bpm()
                 if tb is not None:
                     bpm_value = tb
-            # Update BPM timeline (1 point per processing tick ~10Hz throttled later in UI)
+                    trk_bpm_current = tb
+            # Update BPM histories for timeline
             with bpm_hist_lock:
-                bpm_hist_t.append(time.time())
-                bpm_hist_y.append(float(bpm_value))
+                nowt = float(time.time())
+                if est_bpm_current is not None:
+                    est_bpm_hist_t.append(nowt)
+                    est_bpm_hist_y.append(est_bpm_current)
+                if trk_bpm_current is not None:
+                    trk_bpm_hist_t.append(nowt)
+                    trk_bpm_hist_y.append(trk_bpm_current)
             # Prepare waveform downsample for UI (time in seconds, centered at 0)
             if s.size > 0:
                 t_rel = (np.arange(s.size, dtype=np.float32) - (s.size - 1)) / float(fs)
@@ -508,6 +538,28 @@ def main() -> None:
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
                              min_value=1.5, max_value=5.0, callback=on_band_max,
                              parent=controls_panel_tag)
+        # Estimator selection
+        def on_estimator(sender, app_data, user_data):
+            nonlocal estimator
+            estimator = str(app_data)
+        dpg.add_combo(
+            ("FFT", "ACF", "Hilbert-IF", "Tracker(FFT)", "Tracker(ACF)", "Tracker(IF)"),
+            default_value=estimator,
+            label="Estimator",
+            callback=on_estimator,
+            parent=controls_panel_tag,
+        )
+        # Timeline source selection
+        def on_timeline_src(sender, app_data, user_data):
+            nonlocal timeline_source
+            timeline_source = str(app_data)
+        dpg.add_combo(
+            ("Estimator", "Tracker"),
+            default_value=timeline_source,
+            label="Timeline Source",
+            callback=on_timeline_src,
+            parent=controls_panel_tag,
+        )
         # Estimator parameters
         def on_if_smooth(sender, app_data, user_data):
             nonlocal if_smooth_sec
@@ -519,6 +571,17 @@ def main() -> None:
             max_value=0.50,
             format="%.02f",
             callback=on_if_smooth,
+            parent=controls_panel_tag,
+        )
+        # Quality source selection
+        def on_quality_mode(sender, app_data, user_data):
+            nonlocal quality_mode
+            quality_mode = str(app_data)
+        dpg.add_combo(
+            ("SNR", "Conf", "SNRxConf"),
+            default_value=quality_mode,
+            label="Quality Source",
+            callback=on_quality_mode,
             parent=controls_panel_tag,
         )
         # Tracker parameters (Q/R)
@@ -553,6 +616,30 @@ def main() -> None:
             max_value=1.00,
             format="%.2f",
             callback=on_tracker_r,
+            parent=controls_panel_tag,
+        )
+        def on_quality_floor(sender, app_data, user_data):
+            nonlocal quality_floor
+            quality_floor = float(app_data)
+        dpg.add_slider_float(
+            label="Quality floor",
+            default_value=float(quality_floor),
+            min_value=0.00,
+            max_value=0.50,
+            format="%.2f",
+            callback=on_quality_floor,
+            parent=controls_panel_tag,
+        )
+        def on_quality_scale(sender, app_data, user_data):
+            nonlocal quality_snr_scale
+            quality_snr_scale = float(app_data)
+        dpg.add_slider_float(
+            label="Quality SNR scale",
+            default_value=float(quality_snr_scale),
+            min_value=5.0,
+            max_value=30.0,
+            format="%.1f",
+            callback=on_quality_scale,
             parent=controls_panel_tag,
         )
         # Estimator selection
@@ -832,15 +919,20 @@ def main() -> None:
         if ui_update_callback._bpm_counter % 5 == 0:  # type: ignore[attr-defined]
             try:
                 with bpm_hist_lock:
-                    if len(bpm_hist_t) >= 2:
+                    # Choose source for timeline
+                    if 'timeline_source' not in ui_update_callback.__dict__:
+                        pass
+                    if 'Tracker' == 'Tracker' and timeline_source == 'Tracker':
+                        t_src = trk_bpm_hist_t
+                        y_src = trk_bpm_hist_y
+                    else:
+                        t_src = est_bpm_hist_t
+                        y_src = est_bpm_hist_y
+                    if len(t_src) >= 2:
                         # Show last 90 seconds; convert to relative seconds
-                        t0 = bpm_hist_t[-1] - 90.0
-                        xs = [ti - t0 for ti in bpm_hist_t if ti >= t0]
-                        ys = [
-                            yv
-                            for ti, yv in zip(bpm_hist_t, bpm_hist_y, strict=False)
-                            if ti >= t0
-                        ]
+                        t0 = t_src[-1] - 90.0
+                        xs = [ti - t0 for ti in t_src if ti >= t0]
+                        ys = [yv for ti, yv in zip(t_src, y_src, strict=False) if ti >= t0]
                         if len(xs) >= 2:
                             dpg.set_value(bpm_series_tag, [xs, ys])
             except Exception:
