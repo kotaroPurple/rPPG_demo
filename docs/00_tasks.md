@@ -26,9 +26,9 @@
 - [x] プレビューに顔矩形オーバーレイ（認識可視化）
 - [x] GUI: 推定BPMの時系列プロットを追加（移動窓で更新）
 - [x] GUI: rPPG波形（BPM算出前）のプロットを整備
-- [ ] `quality.py`: SNR/ピーク信頼度算出
-- [ ] `recorder.py`: CSV/JSON 非同期保存
-- [ ] `app.py`（DearPyGUI）: プレビュー、波形/スペクトル、BPM/品質、設定
+- [x] `quality.py`: SNR/ピーク信頼度算出
+- [x] `recorder.py`: CSV/JSON 非同期保存
+- [x] `app.py`（DearPyGUI）: プレビュー、波形/スペクトル、BPM/品質、設定
 
 ### Web連携（将来・現時点では非実施）
 - [ ] `service.py`: FastAPI + WebSocket でメトリクス配信

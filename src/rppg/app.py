@@ -48,7 +48,7 @@ def main() -> None:
     from .chrom import chrom_signal
     from .pos import pos_signal
     from .preprocess import bandpass, moving_average_normalize
-    from .quality import snr_db
+    from .quality import peak_confidence, snr_db
     from .recorder import Recorder, RecorderConfig
     from .roi import FaceBoxROI, mean_rgb
 
@@ -81,6 +81,7 @@ def main() -> None:
     T_buf: Deque[float] = deque(maxlen=int(fps_target * 10))
     bpm_value = 0.0
     snr_value = 0.0
+    conf_value = 0.0
     # Waveform buffer (latest processed window) and BPM timeline
     wave_lock = threading.Lock()
     wave_t_ds: Optional[list[float]] = None
@@ -226,7 +227,8 @@ def main() -> None:
 
     # Processing thread
     def processing_loop() -> None:
-        nonlocal bpm_value, snr_value, spec_freqs_ds, spec_mag_ds, wave_t_ds, wave_y_ds
+        nonlocal bpm_value, snr_value, conf_value
+        nonlocal spec_freqs_ds, spec_mag_ds, wave_t_ds, wave_y_ds
         while running:
             if not connected:
                 time.sleep(0.1)
@@ -265,6 +267,7 @@ def main() -> None:
             mag = np.abs(X)
             idx = int(np.argmax(mag * band))
             snr_value = snr_db(mag, idx)  # used in UI update
+            conf_value = peak_confidence(mag, idx)
             bpm, _ = estimate_bpm(s, fs=fs, fmin=fmin, fmax=fmax_eff)
             bpm_value = bpm
             # Update BPM timeline (1 point per processing tick ~10Hz throttled later in UI)
@@ -367,6 +370,7 @@ def main() -> None:
                 dpg.add_spacer(height=8)
                 bpm_text = dpg.add_text("BPM: --")
                 snr_text = dpg.add_text("SNR: -- dB")
+                conf_text = dpg.add_text("Conf: --")
                 status_text = dpg.add_text("Status: idle")
                 # Plots area without scrolling: place two plots side-by-side
                 with dpg.group(horizontal=True):
@@ -627,6 +631,7 @@ def main() -> None:
         # Update BPM/SNR
         dpg.set_value(bpm_text, f"BPM: {bpm_value:.1f}")
         dpg.set_value(snr_text, f"SNR: {snr_value:.1f} dB")
+        dpg.set_value(conf_text, f"Conf: {conf_value:.2f}")
         # Update ROI status line
         status_roi = f"ROI: {roi_mode_used} | Face: {'Y' if roi_face_found else 'N'}"
         try:
