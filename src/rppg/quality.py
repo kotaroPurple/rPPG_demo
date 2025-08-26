@@ -12,23 +12,34 @@ def snr_db(
     power_spectrum: np.ndarray,
     peak_index: int,
     guard_bins: int = 1,
-    band_bins: int = 5,
+    band_bins: int = 1,
 ) -> float:
-    """Simple SNR estimate around a known peak index in the spectrum.
+    """Estimate SNR at a known peak using local noise floor.
 
-    Args:
-        power_spectrum: magnitude or power spectrum (1D array).
-        peak_index: index of the detected peak within the array.
-        guard_bins: bins excluded around the peak when computing noise.
-        band_bins: number of bins on either side used as the signal band.
+    Signal is taken as the mean magnitude within the peak band (±band_bins),
+    while noise is estimated as the median magnitude of bins outside a guard
+    region (±guard_bins beyond the band). This is robust to outliers and
+    independent of spectrum length.
     """
     p = np.asarray(power_spectrum, dtype=np.float32)
-    n = p.size
-    i0 = max(0, peak_index - band_bins)
-    i1 = min(n, peak_index + band_bins + 1)
-    sig = np.sum(p[i0:i1])
-    noise = np.sum(p[: max(0, i0 - guard_bins)]) + np.sum(p[min(n, i1 + guard_bins) :])
-    if noise <= 0:
+    n = int(p.size)
+    if n == 0:
+        return 0.0
+    # Clip band around peak
+    i0 = max(0, int(peak_index) - int(band_bins))
+    i1 = min(n, int(peak_index) + int(band_bins) + 1)
+    sig = float(np.mean(p[i0:i1])) if i1 > i0 else float(p[int(peak_index)])
+    # Build noise mask excluding a guard region around the band
+    g0 = max(0, i0 - int(guard_bins))
+    g1 = min(n, i1 + int(guard_bins))
+    if g0 <= 0 and g1 >= n:
+        # No room for noise estimation
+        return 0.0
+    noise_bins = np.concatenate([p[:g0], p[g1:]]) if g1 < n else p[:g0]
+    if noise_bins.size == 0:
+        return 0.0
+    noise = float(np.median(noise_bins))
+    if noise <= 0.0:
         return 0.0
     return 10.0 * float(np.log10(sig / noise))
 
