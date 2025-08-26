@@ -61,6 +61,8 @@ def main() -> None:
     fmin, fmax = 0.7, 2.0  # default upper bound 120 BPM for stability
     algo = "POS"  # or CHROM
     estimator = "FFT"  # FFT | ACF | Hilbert-IF | Tracker(FFT|ACF|IF)
+    # Estimator parameters
+    if_smooth_sec = 0.10  # seconds for IF moving-average
     # Default camera index
     import sys as _sys
     selected_device = 0
@@ -287,7 +289,7 @@ def main() -> None:
                     bpm_value = float(ar.bpm)
                 last_t_for_tracker = float(time.time())
             elif estimator == "Hilbert-IF":
-                ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(0.1 * fs)))
+                ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(if_smooth_sec * fs)))
                 if ir.bpm is not None:
                     bpm_value = float(ir.bpm)
                 last_t_for_tracker = float(time.time())
@@ -307,7 +309,7 @@ def main() -> None:
                     ar = estimate_bpm_acf(s, fs=fs, bpm_min=60.0 * fmin, bpm_max=60.0 * fmax_eff)
                     meas_bpm = ar.bpm
                 elif estimator == "Tracker(IF)":
-                    ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(0.1 * fs)))
+                    ir = estimate_bpm_if(s, fs=fs, smooth_len=max(3, int(if_smooth_sec * fs)))
                     meas_bpm = ir.bpm
                 # Map SNR to quality [0..1]
                 qual = float(np.clip((snr_value / 15.0), 0.05, 1.0))
@@ -506,6 +508,53 @@ def main() -> None:
         dpg.add_slider_float(label="Band max (Hz)", default_value=fmax,
                              min_value=1.5, max_value=5.0, callback=on_band_max,
                              parent=controls_panel_tag)
+        # Estimator parameters
+        def on_if_smooth(sender, app_data, user_data):
+            nonlocal if_smooth_sec
+            if_smooth_sec = float(app_data)
+        dpg.add_slider_float(
+            label="IF smooth (s)",
+            default_value=if_smooth_sec,
+            min_value=0.02,
+            max_value=0.50,
+            format="%.02f",
+            callback=on_if_smooth,
+            parent=controls_panel_tag,
+        )
+        # Tracker parameters (Q/R)
+        def on_tracker_qf(sender, app_data, user_data):
+            tracker.cfg.q_freq = float(app_data)
+        dpg.add_slider_float(
+            label="Tracker q_freq",
+            default_value=float(tracker.cfg.q_freq),
+            min_value=0.001,
+            max_value=0.200,
+            format="%.3f",
+            callback=on_tracker_qf,
+            parent=controls_panel_tag,
+        )
+        def on_tracker_qd(sender, app_data, user_data):
+            tracker.cfg.q_drift = float(app_data)
+        dpg.add_slider_float(
+            label="Tracker q_drift",
+            default_value=float(tracker.cfg.q_drift),
+            min_value=0.001,
+            max_value=0.200,
+            format="%.3f",
+            callback=on_tracker_qd,
+            parent=controls_panel_tag,
+        )
+        def on_tracker_r(sender, app_data, user_data):
+            tracker.cfg.r_meas = float(app_data)
+        dpg.add_slider_float(
+            label="Tracker r_meas",
+            default_value=float(tracker.cfg.r_meas),
+            min_value=0.01,
+            max_value=1.00,
+            format="%.2f",
+            callback=on_tracker_r,
+            parent=controls_panel_tag,
+        )
         # Estimator selection
         def on_estimator(sender, app_data, user_data):
             nonlocal estimator
